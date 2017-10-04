@@ -36,7 +36,8 @@ def cuda_tpb_bpg_1d(x, TPB = 256):
         Number of blocks per grid
 
     TPB : int
-        Threads per block
+        Threads per block. Can also be set via FBPIC_1D_TPB environment
+        variable
     """
     # Calculates the needed blocks per grid
     if 'FBPIC_1D_TPB' in os.environ:
@@ -55,7 +56,8 @@ def cuda_tpb_bpg_2d(x, y, TPBx = 8, TPBy = 8):
         Total number of threads in first and second dimension
 
     TPBx, TPBy : int
-        Threads per block in x and y
+        Threads per block in x and y. Can also be set via FBPIC_2D_TPBX
+        and FBPIC_2D_TPBY environment variable
 
     Returns :
     ------------
