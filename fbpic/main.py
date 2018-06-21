@@ -640,7 +640,7 @@ class Simulation(object):
     def add_new_species( self, q, m, n=None, dens_func=None,
                             p_nz=None, p_nr=None, p_nt=None,
                             p_zmin=-np.inf, p_zmax=np.inf,
-                            p_rmin=0, p_rmax=np.inf, uz_m=0.,
+                            p_rmin=0, p_rmax=np.inf, uz_m=0., u_th=0.,
                             continuous_injection=True ):
         """
         Create a new species (i.e. an instance of `Particles`) with
@@ -758,11 +758,15 @@ class Simulation(object):
             continuous_injection = False
             dz_particles = 0.
 
+        # Thermal momentum component in each direction
+        ui_th = u_th / np.sqrt(3)
+
         # Create the new species
         new_species = Particles( q=q, m=m, n=n, dens_func=dens_func,
                         Npz=Npz, zmin=p_zmin, zmax=p_zmax,
                         Npr=Npr, rmin=p_rmin, rmax=p_rmax,
                         Nptheta=p_nt, dt=self.dt, uz_m=uz_m,
+                        ux_th=ui_th, uy_th=ui_th, uz_th=ui_th,
                         particle_shape=self.particle_shape,
                         use_cuda=self.use_cuda, grid_shape=self.grid_shape,
                         continuous_injection=continuous_injection,
