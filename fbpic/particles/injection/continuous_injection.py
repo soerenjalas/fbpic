@@ -16,7 +16,8 @@ class ContinuousInjector( object ):
     """
 
     def __init__(self, Npz, zmin, zmax, dz_particles, Npr, rmin, rmax,
-                Nptheta, n, dens_func, ux_m, uy_m, uz_m, ux_th, uy_th, uz_th ):
+                 Nptheta, n, dens_func, ux_m, uy_m, uz_m,
+                 ux_th, uy_th, uz_th, random_positions ):
         """
         Initialize continuous injection
 
@@ -37,6 +38,7 @@ class ContinuousInjector( object ):
         self.ux_th = ux_th
         self.uy_th = uy_th
         self.uz_th = uz_th
+        self.random_positions = random_positions
 
         # Register spacing between evenly-spaced particles in z
         if Npz != 0:
@@ -54,6 +56,7 @@ class ContinuousInjector( object ):
         self.nz_inject = None
         self.z_inject = None
         self.z_end_plasma = None
+
 
 
     def initialize_injection_positions( self, comm, v_moving_window,
@@ -151,7 +154,7 @@ class ContinuousInjector( object ):
         self.z_end_plasma += nz_new * self.dz_particles
 
 
-    def generate_particles( self, time ):
+    def generate_particles( self, time):
         """
         Generate new particles at the right end of the plasma
         (i.e. between z_end_plasma - nz_inject*dz and z_end_plasma)
@@ -175,11 +178,19 @@ class ContinuousInjector( object ):
         zmax = self.z_end_plasma
         zmin = self.z_end_plasma - self.nz_inject*self.dz_particles
         # Create the particles
-        Ntot, x, y, z, ux, uy, uz, inv_gamma, w = generate_evenly_spaced(
+
+        if self.random_positions is True:
+            Ntot, x, y, z, ux, uy, uz, inv_gamma, w = generate_randomly_spaced(
                 Npz, zmin, zmax, self.Npr, self.rmin, self.rmax,
                 self.Nptheta, self.n, dens_func,
                 self.ux_m, self.uy_m, self.uz_m,
                 self.ux_th, self.uy_th, self.uz_th )
+        else:
+            Ntot, x, y, z, ux, uy, uz, inv_gamma, w = generate_evenly_spaced(
+                    Npz, zmin, zmax, self.Npr, self.rmin, self.rmax,
+                    self.Nptheta, self.n, dens_func,
+                    self.ux_m, self.uy_m, self.uz_m,
+                    self.ux_th, self.uy_th, self.uz_th )
 
         # Reset the number of particle cells to be created
         self.nz_inject = 0
@@ -254,6 +265,73 @@ def generate_evenly_spaced( Npz, zmin, zmax, Npr, rmin, rmax,
     else:
         # No particles are initialized ; the arrays are still created
         Ntot = 0
+        return( Ntot, np.empty(0), np.empty(0), np.empty(0), np.empty(0),
+                      np.empty(0), np.empty(0), np.empty(0), np.empty(0) )
+
+
+def generate_randomly_spaced( Npz, zmin, zmax, Npr, rmin, rmax,
+    Nptheta, n, dens_func, ux_m, uy_m, uz_m, ux_th, uy_th, uz_th ):
+    """
+    Generate evenly-spaced particles, according to the density function
+    `dens_func`, and with the momenta given by the `ux/y/z` arguments.
+    Parameters
+    ----------
+    See the docstring of the `Particles` object
+    """
+    # Generate the particles and eliminate the ones that have zero weight ;
+    # infer the number of particles Ntot
+    Ntot = Npz * Npr * Nptheta
+    if Ntot > 0:
+        # Get the 1d arrays of evenly-spaced positions for the particles
+        dz = (zmax - zmin) * 1. / Npz
+        z_reg = zmin + dz * ( np.arange(Npz) + 0.5 )
+        dr = (rmax - rmin) * 1. / Npr
+        r_reg = rmin + dr * ( np.arange(Npr) + 0.5 )
+        dtheta = 2 * np.pi / Nptheta
+        theta_reg = dtheta * np.arange(Nptheta)
+
+        # Get the corresponding particles positions
+        # (copy=True is important here, since it allows to
+        # change the angles individually)
+        zp, rp, thetap = np.meshgrid( z_reg, r_reg, theta_reg,
+                                      copy=True, indexing='ij' )
+        # Prevent the particles from being aligned along any direction
+        unalign_angles( thetap, Npz, Npr, method='random' )
+        # Flatten them (This performs a memory copy)
+        r = rp.flatten() + np.random.rand(Ntot) * dr
+        x = r * np.cos( thetap.flatten() )
+        y = r * np.sin( thetap.flatten() )
+        z = zp.flatten() + np.random.rand(Ntot) * dz
+        # Get the weights (i.e. charge of each macroparticle), which
+        # are equal to the density times the volume r d\theta dr dz
+        w = n * r * dtheta * dr * dz
+        # Modulate it by the density profile
+        if dens_func is not None:
+            w *= dens_func( z, r )
+
+        # Select the particles that have a non-zero weight
+        selected = (w > 0)
+        if np.any(w < 0):
+            warnings.warn(
+            'The specified particle density returned negative densities.\n'
+            'No particles were generated in areas of negative density.\n'
+            'Please check the validity of the `dens_func`.')
+
+        # Infer the number of particles and select them
+        Ntot = int(selected.sum())
+        x = x[ selected ]
+        y = y[ selected ]
+        z = z[ selected ]
+        w = w[ selected ]
+        # Initialize the corresponding momenta
+        uz = uz_m * np.ones(Ntot) + uz_th * np.random.normal(size=Ntot)
+        ux = ux_m * np.ones(Ntot) + ux_th * np.random.normal(size=Ntot)
+        uy = uy_m * np.ones(Ntot) + uy_th * np.random.normal(size=Ntot)
+        inv_gamma = 1. / np.sqrt( 1 + ux ** 2 + uy ** 2 + uz ** 2 )
+        # Return the particle arrays
+        return( Ntot, x, y, z, ux, uy, uz, inv_gamma, w )
+    else:
+        # No particles are initialized ; the arrays are still created
         return( Ntot, np.empty(0), np.empty(0), np.empty(0), np.empty(0),
                       np.empty(0), np.empty(0), np.empty(0), np.empty(0) )
 

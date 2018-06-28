@@ -643,7 +643,8 @@ class Simulation(object):
                             p_rmin=0, p_rmax=np.inf,
                             uz_m=0., ux_m=0., uy_m=0.,
                             uz_th=0., ux_th=0., uy_th=0.,
-                            continuous_injection=True ):
+                            continuous_injection=True,
+                            random_positions=False ):
         """
         Create a new species (i.e. an instance of `Particles`) with
         charge `q` and mass `m`. Add it to the simulation (i.e. to the list
@@ -716,6 +717,9 @@ class Simulation(object):
         continuous_injection : bool, optional
            Whether to continuously inject the particles,
            in the case of a moving window
+
+        random_positions: bool, optional
+            Wether to inject particles with randomized positions in z and r
 
         Returns
         -------

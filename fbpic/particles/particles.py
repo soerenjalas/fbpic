@@ -66,7 +66,8 @@ class Particles(object) :
                     ux_th=0., uy_th=0., uz_th=0.,
                     dens_func=None, continuous_injection=True,
                     grid_shape=None, particle_shape='linear',
-                    use_cuda=False, dz_particles=None ):
+                    use_cuda=False, dz_particles=None,
+                    random_positions=False ):
         """
         Initialize a uniform set of particles
 
@@ -136,6 +137,9 @@ class Particles(object) :
             from the arguments `zmin`, `zmax` and `Npz`. However, when
             there are no particles in the initial box (`Npz = 0`),
             `dz_particles` needs to be explicitly passed.
+
+        random_positions: bool, optional
+            Wether to inject particles with randomized positions in z and r
         """
         # Define whether or not to use the GPU
         self.use_cuda = use_cuda
@@ -183,7 +187,8 @@ class Particles(object) :
                                                 Npr, rmin, rmax,
                                                 Nptheta, n, dens_func,
                                                 ux_m, uy_m, uz_m,
-                                                ux_th, uy_th, uz_th )
+                                                ux_th, uy_th, uz_th,
+                                                random_positions )
         else:
             self.injector = None
 
