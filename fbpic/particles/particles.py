@@ -12,7 +12,7 @@ from .tracking import ParticleTracker
 from .elementary_process.ionization import Ionizer
 from .elementary_process.compton import ComptonScatterer
 from .injection import BallisticBeforePlane, ContinuousInjector, \
-                        generate_evenly_spaced
+                        generate_evenly_spaced, generate_randomly_spaced
 
 # Load the numba methods
 from .push.numba_methods import push_p_numba, push_p_ioniz_numba, \
@@ -150,9 +150,14 @@ class Particles(object) :
             self.use_cuda = False
 
         # Generate evenly-spaced particles
-        Ntot, x, y, z, ux, uy, uz, inv_gamma, w = generate_evenly_spaced(
+        if random_positions is True:
+            Ntot, x, y, z, ux, uy, uz, inv_gamma, w = generate_randomly_spaced(
             Npz, zmin, zmax, Npr, rmin, rmax, Nptheta, n, dens_func,
             ux_m, uy_m, uz_m, ux_th, uy_th, uz_th )
+        else:
+            Ntot, x, y, z, ux, uy, uz, inv_gamma, w = generate_evenly_spaced(
+                Npz, zmin, zmax, Npr, rmin, rmax, Nptheta, n, dens_func,
+                ux_m, uy_m, uz_m, ux_th, uy_th, uz_th )
 
         # Register the properties of the particles
         # (Necessary for the pusher, and when adding more particles later, )

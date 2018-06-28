@@ -799,7 +799,8 @@ class Simulation(object):
                         ux_m=ux_m, uy_m=uy_m, uz_m=uz_m,
                         ux_th=ux_th, uy_th=uy_th, uz_th=uz_th,
                         continuous_injection=continuous_injection,
-                        dz_particles=dz_particles )
+                        dz_particles=dz_particles,
+                        random_positions=random_positions )
 
         # Add it to the list of species and return it to the user
         self.ptcl.append( new_species )
