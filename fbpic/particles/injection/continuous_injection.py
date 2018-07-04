@@ -298,7 +298,9 @@ def generate_randomly_spaced( Npz, zmin, zmax, Npr, rmin, rmax,
         # Prevent the particles from being aligned along any direction
         unalign_angles( thetap, Npz, Npr, method='random' )
         # Flatten them (This performs a memory copy)
-        r = rp.flatten() + np.random.rand(Ntot) * dr
+        # And add random offset in r and z
+        r = rp.flatten() + np.random.rand(Ntot) * dr / 2 - \
+            np.random.rand(Ntot) * dr / 2
         x = r * np.cos( thetap.flatten() )
         y = r * np.sin( thetap.flatten() )
         z = zp.flatten() + np.random.rand(Ntot) * dz
