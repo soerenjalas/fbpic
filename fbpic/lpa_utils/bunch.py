@@ -13,7 +13,8 @@ from fbpic.particles.elementary_process.cuda_numba_utils import \
 from fbpic.particles.injection import BallisticBeforePlane
 
 def add_elec_bunch( sim, gamma0, n_e, p_zmin, p_zmax, p_rmin, p_rmax,
-                p_nr=2, p_nz=2, p_nt=4, dens_func=None, boost=None,
+                p_nr=2, p_nz=2, p_nt=4, dens_func=None,
+                ux_th=0, uy_th=0, uz_th=0, boost=None,
                 direction='forward', z_injection_plane=None ) :
     """
     Introduce a simple relativistic electron bunch in the simulation,
@@ -84,7 +85,8 @@ def add_elec_bunch( sim, gamma0, n_e, p_zmin, p_zmax, p_rmin, p_rmax,
                             p_zmin=p_zmin, p_zmax=p_zmax,
                             p_rmin=p_rmin, p_rmax=p_rmax,
                             continuous_injection=False,
-                            dens_func=dens_func, uz_m=uz_m )
+                            dens_func=dens_func, uz_m=uz_m,
+                            ux_th=ux_th, uy_th=uy_th, uz_th=uz_th )
 
     # Initialize the injection plane for the particles
     if z_injection_plane is not None:
