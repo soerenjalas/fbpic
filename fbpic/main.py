@@ -53,7 +53,7 @@ class Simulation(object):
                  current_correction='curl-free', boundaries='periodic',
                  gamma_boost=None, use_all_mpi_ranks=True,
                  particle_shape='linear', verbose_level=1,
-                 smoother=None ):
+                 smoother=None, state_temp=None, state_theta=None ):
         """
         Initializes a simulation.
 
@@ -244,6 +244,8 @@ class Simulation(object):
                     create_threading_buffers=(self.use_cuda is False) )
 
         # Initialize the electrons and the ions
+        self.state_temp = state_temp
+        self.state_theta = state_theta
         self.grid_shape = self.fld.interp[0].Ez.shape
         self.particle_shape = particle_shape
         self.ptcl = []
@@ -828,7 +830,9 @@ class Simulation(object):
                         ux_m=ux_m, uy_m=uy_m, uz_m=uz_m,
                         ux_th=ux_th, uy_th=uy_th, uz_th=uz_th,
                         continuous_injection=continuous_injection,
-                        dz_particles=dz_particles )
+                        dz_particles=dz_particles,
+                        state_temp=self.state_temp,
+                        state_theta=self.state_theta)
 
         # Add it to the list of species and return it to the user
         self.ptcl.append( new_species )

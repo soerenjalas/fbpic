@@ -16,7 +16,8 @@ class ContinuousInjector( object ):
     """
 
     def __init__(self, Npz, zmin, zmax, dz_particles, Npr, rmin, rmax,
-                Nptheta, n, dens_func, ux_m, uy_m, uz_m, ux_th, uy_th, uz_th ):
+                Nptheta, n, dens_func, ux_m, uy_m, uz_m, ux_th, uy_th, uz_th,
+                state_temp=None, state_theta=None):
         """
         Initialize continuous injection
 
@@ -37,6 +38,8 @@ class ContinuousInjector( object ):
         self.ux_th = ux_th
         self.uy_th = uy_th
         self.uz_th = uz_th
+        self.state_temp = state_temp
+        self.state_theta = state_theta
 
         # Register spacing between evenly-spaced particles in z
         if Npz != 0:
@@ -183,7 +186,8 @@ class ContinuousInjector( object ):
                 Npz, zmin, zmax, self.Npr, self.rmin, self.rmax,
                 self.Nptheta, self.n, dens_func,
                 self.ux_m, self.uy_m, self.uz_m,
-                self.ux_th, self.uy_th, self.uz_th )
+                self.ux_th, self.uy_th, self.uz_th,
+                self.state_temp, self.state_theta)
 
         # Reset the number of particle cells to be created
         self.nz_inject = 0
@@ -195,7 +199,8 @@ class ContinuousInjector( object ):
 # -----------------
 
 def generate_evenly_spaced( Npz, zmin, zmax, Npr, rmin, rmax,
-    Nptheta, n, dens_func, ux_m, uy_m, uz_m, ux_th, uy_th, uz_th ):
+    Nptheta, n, dens_func, ux_m, uy_m, uz_m, ux_th, uy_th, uz_th,
+    state_temp, state_theta ):
     """
     Generate evenly-spaced particles, according to the density function
     `dens_func`, and with the momenta given by the `ux/y/z` arguments.
@@ -221,7 +226,8 @@ def generate_evenly_spaced( Npz, zmin, zmax, Npr, rmin, rmax,
         zp, rp, thetap = np.meshgrid( z_reg, r_reg, theta_reg,
                                     copy=True, indexing='ij' )
         # Prevent the particles from being aligned along any direction
-        unalign_angles( thetap, Npz, Npr, method='random' )
+        unalign_angles( thetap, Npz, Npr,
+                       method='random', state=state_theta )
         # Flatten them (This performs a memory copy)
         r = rp.flatten()
         x = r * np.cos( thetap.flatten() )
@@ -249,9 +255,14 @@ def generate_evenly_spaced( Npz, zmin, zmax, Npr, rmin, rmax,
         z = z[ selected ]
         w = w[ selected ]
         # Initialize the corresponding momenta
-        uz = uz_m * np.ones(Ntot) + uz_th * np.random.normal(size=Ntot)
-        ux = ux_m * np.ones(Ntot) + ux_th * np.random.normal(size=Ntot)
-        uy = uy_m * np.ones(Ntot) + uy_th * np.random.normal(size=Ntot)
+        if state_temp:
+            uz = uz_m * np.ones(Ntot) + uz_th * state_temp.normal(size=Ntot)
+            ux = ux_m * np.ones(Ntot) + ux_th * state_temp.normal(size=Ntot)
+            uy = uy_m * np.ones(Ntot) + uy_th * state_temp.normal(size=Ntot)
+        else:
+            uz = uz_m * np.ones(Ntot) + uz_th * np.random.normal(size=Ntot)
+            ux = ux_m * np.ones(Ntot) + ux_th * np.random.normal(size=Ntot)
+            uy = uy_m * np.ones(Ntot) + uy_th * np.random.normal(size=Ntot)
         inv_gamma = 1./np.sqrt( 1 + ux**2 + uy**2 + uz**2 )
         # Return the particle arrays
         return( Ntot, x, y, z, ux, uy, uz, inv_gamma, w )
@@ -262,7 +273,7 @@ def generate_evenly_spaced( Npz, zmin, zmax, Npr, rmin, rmax,
                       np.empty(0), np.empty(0), np.empty(0), np.empty(0) )
 
 
-def unalign_angles( thetap, Npz, Npr, method='irrational' ) :
+def unalign_angles( thetap, Npz, Npr, method='irrational', state=None ) :
     """
     Shift the angles so that the particles are
     not all aligned along the arms of a star transversely
@@ -291,7 +302,10 @@ def unalign_angles( thetap, Npz, Npr, method='irrational' ) :
     """
     # Determine the angle shift
     if method == 'random' :
-        angle_shift = 2*np.pi*np.random.rand(Npz, Npr)
+        if state:
+            angle_shift = 2*np.pi*state.rand(Npz, Npr)
+        else:
+            angle_shift = 2*np.pi*np.random.rand(Npz, Npr)
     elif method == 'irrational' :
         # Subrandom sequence, by adding irrational number (sqrt(2) and sqrt(3))
         # This ensures that the sequence does not wrap around and induce

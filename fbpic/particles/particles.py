@@ -66,7 +66,8 @@ class Particles(object) :
                     ux_th=0., uy_th=0., uz_th=0.,
                     dens_func=None, continuous_injection=True,
                     grid_shape=None, particle_shape='linear',
-                    use_cuda=False, dz_particles=None ):
+                    use_cuda=False, dz_particles=None,
+                    state_temp=None, state_theta=None):
         """
         Initialize a uniform set of particles
 
@@ -148,7 +149,8 @@ class Particles(object) :
         # Generate evenly-spaced particles
         Ntot, x, y, z, ux, uy, uz, inv_gamma, w = generate_evenly_spaced(
             Npz, zmin, zmax, Npr, rmin, rmax, Nptheta, n, dens_func,
-            ux_m, uy_m, uz_m, ux_th, uy_th, uz_th )
+            ux_m, uy_m, uz_m, ux_th, uy_th, uz_th,
+            state_temp=state_temp, state_theta=state_theta)
 
         # Register the properties of the particles
         # (Necessary for the pusher, and when adding more particles later, )
@@ -183,7 +185,10 @@ class Particles(object) :
                                                 Npr, rmin, rmax,
                                                 Nptheta, n, dens_func,
                                                 ux_m, uy_m, uz_m,
-                                                ux_th, uy_th, uz_th )
+                                                ux_th, uy_th, uz_th,
+                                                state_temp=state_temp,
+                                                state_theta=state_theta
+                                              )
         else:
             self.injector = None
 
