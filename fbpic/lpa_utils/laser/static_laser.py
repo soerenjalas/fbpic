@@ -67,6 +67,7 @@ class StaticField(object):
         for i in range(self.Nm):
             fld = self.sim.fld.spect[i]
             if self.use_cuda:
+                dim_grid, dim_block = cuda_tpb_bpg_2d( self.Nz, self.Nr, 1, 16 )
                 cuda_remove_static_field[dim_grid, dim_block](
                                fld.Ep, fld.Em, fld.Ez,
                                fld.Bp, fld.Bm, fld.Bz,
