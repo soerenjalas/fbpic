@@ -426,6 +426,7 @@ class Simulation(object):
                 diag.write( self.iteration )
             if freeze_field:
                 static_field.remove_field()
+                static_field.shift_field()
             # Push the particles' positions and velocities to t = (n+1/2) dt
             if move_momenta:
                 for species in ptcl:
