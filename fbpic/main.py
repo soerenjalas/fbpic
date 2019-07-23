@@ -29,6 +29,7 @@ from .particles import Particles
 from .lpa_utils.boosted_frame import BoostConverter
 from .fields import Fields
 from .boundaries import BoundaryCommunicator, MovingWindow
+from fbpic.lpa_utils.laser.static_laser import StaticField
 
 class Simulation(object):
     """
@@ -286,7 +287,7 @@ class Simulation(object):
         print_simulation_setup( self, verbose_level=verbose_level )
 
     def step(self, N=1, correct_currents=True,
-             correct_divE=False, use_true_rho=False,
+             correct_divE=False, use_true_rho=False, freeze_field=False,
              move_positions=True, move_momenta=True, show_progress=True):
         """
         Perform N PIC cycles.
@@ -353,6 +354,16 @@ class Simulation(object):
         fld.interp2spect('E')
         fld.interp2spect('B')
 
+        if freeze_field:
+            static_field = StaticField(self, self.use_cuda)
+            fld.erase('E')
+            fld.erase('B')
+            fld.interp2spect('E')
+            fld.interp2spect('B')
+
+
+
+
         # Beginning of the N iterations
         # -----------------------------
 
@@ -394,7 +405,10 @@ class Simulation(object):
 
             # Main PIC iteration
             # ------------------
-
+            if freeze_field:
+                static_field.add_field()
+                fld.spect2interp('E')
+                fld.spect2interp('B')
             # Gather the fields from the grid at t = n dt
             for species in ptcl:
                 species.gather( fld.interp )
@@ -410,7 +424,8 @@ class Simulation(object):
                 # (If needed: bring rho/J from spectral space, where they
                 # were smoothed/corrected, and copy the data from the GPU.)
                 diag.write( self.iteration )
-
+            if freeze_field:
+                static_field.remove_field()
             # Push the particles' positions and velocities to t = (n+1/2) dt
             if move_momenta:
                 for species in ptcl:
