@@ -2,6 +2,7 @@ from scipy.constants import c
 from .direct_injection import add_laser_direct
 from numba import cuda
 from fbpic.utils.cuda import send_data_to_gpu, receive_data_from_gpu
+from fbpic.utils.cuda import cuda_tpb_bpg_2d
 
 class StaticField(object):
     """Freeze inital field and propagate it with the velocity of the moving window"""
@@ -48,7 +49,9 @@ class StaticField(object):
         for i in range(self.Nm):
             fld = self.sim.fld.spect[i]
             if self.use_cuda:
-                cuda_add_static_field( fld.Ep, fld.Em, fld.Ez,
+                dim_grid, dim_block = cuda_tpb_bpg_2d( self.Nz, self.Nr, 1, 16 )
+                cuda_add_static_field[dim_grid, dim_block](
+                               fld.Ep, fld.Em, fld.Ez,
                                fld.Bp, fld.Bm, fld.Bz,
                                self.Ep[i], self.Em[i], self.Ez[i],
                                self.Bp[i], self.Bm[i], self.Bz[i],
@@ -64,7 +67,8 @@ class StaticField(object):
         for i in range(self.Nm):
             fld = self.sim.fld.spect[i]
             if self.use_cuda:
-                cuda_remove_static_field( fld.Ep, fld.Em, fld.Ez,
+                cuda_remove_static_field[dim_grid, dim_block](
+                               fld.Ep, fld.Em, fld.Ez,
                                fld.Bp, fld.Bm, fld.Bz,
                                self.Ep[i], self.Em[i], self.Ez[i],
                                self.Bp[i], self.Bm[i], self.Bz[i],
