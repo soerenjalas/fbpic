@@ -54,9 +54,9 @@ class StaticField(object):
             self.Bz[i] = cuda.to_device( self.Bz[i] )
 
     def shift_field( self ):
-        dt = self.sim.time - self.win.t_last_move - self.sim.dt
-        print(dt)
-        self.field_shift = np.exp(-1.j*self.kz_true*self.vg*dt)
+        dt = self.sim.dt
+        shift = self.win.n_move * self.dz
+        self.field_shift = np.exp(-1.j*self.kz_true*(self.vg*dt-shift))
 
         if self.use_cuda:
             self.d_field_shift = cuda.to_device( self.field_shift )

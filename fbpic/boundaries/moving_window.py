@@ -46,6 +46,7 @@ class MovingWindow(object):
         self.v = v
         # Attach time of last move
         self.t_last_move = time - dt
+        self.n_move = 0
 
         # Get the positions of the global physical domain
         zmin_global_domain, zmax_global_domain = comm.get_zmin_zmax(
@@ -129,7 +130,7 @@ class MovingWindow(object):
 
         # Change the time of the last move
         self.t_last_move = time
-
+        self.n_move = n_move
 
     def shift_spect_grid( self, grid, n_move,
                           shift_rho=True, shift_currents=True ):
