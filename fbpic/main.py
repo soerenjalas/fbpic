@@ -411,6 +411,7 @@ class Simulation(object):
                 static_field.add_field()
                 fld.spect2interp('E')
                 fld.spect2interp('B')
+                
             # Gather the fields from the grid at t = n dt
             for species in ptcl:
                 species.gather( fld.interp )
@@ -418,6 +419,7 @@ class Simulation(object):
             for ext_field in self.external_fields:
                 ext_field.apply_expression( self.ptcl, self.time )
 
+            
             # Run the diagnostics
             # (after gathering ; allows output of gathered fields on particles)
             # (E, B, rho, x are defined at time n ; J, p at time n-1/2)

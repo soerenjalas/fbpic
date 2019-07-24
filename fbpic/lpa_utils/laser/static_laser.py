@@ -91,7 +91,10 @@ class StaticField(object):
 
 
     def add_field( self ):
-        for i in range(self.Nm):
+        # replace E and B in mode 1  with frozen field
+        iN = [1]
+        #for i in range(self.Nm):
+        for i in iN:
             fld = self.sim.fld.spect[i]
             if self.use_cuda:
                 dim_grid, dim_block = cuda_tpb_bpg_2d( self.Nz, self.Nr, 1, 16 )
@@ -109,7 +112,10 @@ class StaticField(object):
                                self.Nz, self.Nr )
 
     def remove_field( self ):
-        for i in range(self.Nm):
+        # Delete E and B in mode 1
+        iN = [1]
+        #for i in range(self.Nm):
+        for i in iN:
             fld = self.sim.fld.spect[i]
             if self.use_cuda:
                 dim_grid, dim_block = cuda_tpb_bpg_2d( self.Nz, self.Nr, 1, 16 )
@@ -136,23 +142,23 @@ if cuda_installed:
 
         if (iz < Nz) and (ir < Nr) :
 
-            Ep[iz, ir] += Eps[iz, ir]
-            Em[iz, ir] += Ems[iz, ir]
-            Ez[iz, ir] += Ezs[iz, ir]
-            Bp[iz, ir] += Bps[iz, ir]
-            Bm[iz, ir] += Bms[iz, ir]
-            Bz[iz, ir] += Bzs[iz, ir]
+            Ep[iz, ir] = Eps[iz, ir]
+            Em[iz, ir] = Ems[iz, ir]
+            Ez[iz, ir] = Ezs[iz, ir]
+            Bp[iz, ir] = Bps[iz, ir]
+            Bm[iz, ir] = Bms[iz, ir]
+            Bz[iz, ir] = Bzs[iz, ir]
 
 def cpu_add_static_field( Ep, Em, Ez, Bp, Bm, Bz,
                            Eps, Ems, Ezs, Bps, Bms, Bzs,
                            Nz, Nr):
 
-        Ep += Eps
-        Em += Ems
-        Ez += Ezs
-        Bp += Bps
-        Bm += Bms
-        Bz += Bzs
+        Ep[:,:] = Eps[:,:]
+        Em[:,:] = Ems[:,:]
+        Ez[:,:] = Ezs[:,:]
+        Bp[:,:] = Bps[:,:]
+        Bm[:,:] = Bms[:,:]
+        Bz[:,:] = Bzs[:,:]
 
 if cuda_installed:
     @cuda.jit
@@ -164,20 +170,34 @@ if cuda_installed:
 
         if (iz < Nz) and (ir < Nr) :
 
-            Ep[iz, ir] -= Eps[iz, ir]
-            Em[iz, ir] -= Ems[iz, ir]
-            Ez[iz, ir] -= Ezs[iz, ir]
-            Bp[iz, ir] -= Bps[iz, ir]
-            Bm[iz, ir] -= Bms[iz, ir]
-            Bz[iz, ir] -= Bzs[iz, ir]
+            # Ep[iz, ir] -= Eps[iz, ir]
+            # Em[iz, ir] -= Ems[iz, ir]
+            # Ez[iz, ir] -= Ezs[iz, ir]
+            # Bp[iz, ir] -= Bps[iz, ir]
+            # Bm[iz, ir] -= Bms[iz, ir]
+            # Bz[iz, ir] -= Bzs[iz, ir]
+
+            Ep[iz, ir] *= 0
+            Em[iz, ir] *= 0
+            Ez[iz, ir] *= 0
+            Bp[iz, ir] *= 0
+            Bm[iz, ir] *= 0
+            Bz[iz, ir] *= 0
 
 def cpu_remove_static_field( Ep, Em, Ez, Bp, Bm, Bz,
                            Eps, Ems, Ezs, Bps, Bms, Bzs,
                            Nz, Nr):
 
-        Ep -= Eps
-        Em -= Ems
-        Ez -= Ezs
-        Bp -= Bps
-        Bm -= Bms
-        Bz -= Bzs
+        #Ep -= Eps
+        #Em -= Ems
+        #Ez -= Ezs
+        #Bp -= Bps
+        #Bm -= Bms
+        #Bz -= Bzs
+
+        Ep *= 0
+        Em *= 0
+        Ez *= 0
+        Bp *= 0
+        Bm *= 0
+        Bz *= 0
