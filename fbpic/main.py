@@ -287,8 +287,9 @@ class Simulation(object):
         print_simulation_setup( self, verbose_level=verbose_level )
 
     def step(self, N=1, correct_currents=True,
-             correct_divE=False, use_true_rho=False, freeze_field=False,
-             move_positions=True, move_momenta=True, show_progress=True):
+             correct_divE=False, use_true_rho=False,
+             move_positions=True, move_momenta=True, show_progress=True,
+             freeze_field=False, vg_freeze=c):
         """
         Perform N PIC cycles.
 
@@ -355,7 +356,7 @@ class Simulation(object):
         fld.interp2spect('B')
 
         if freeze_field:
-            static_field = StaticField(self, self.use_cuda)
+            static_field = StaticField(self, self.use_cuda, vg=vg_freeze)
             fld.erase('E')
             fld.erase('B')
             fld.interp2spect('E')
