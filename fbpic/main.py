@@ -515,7 +515,13 @@ class Simulation(object):
 
             # Write the checkpoints if needed
             for checkpoint in self.checkpoints:
+                if freeze_field:
+                    static_field.add_field()
+                    fld.spect2interp('E')
+                    fld.spect2interp('B')
                 checkpoint.write( self.iteration )
+                if freeze_field:
+                    static_field.remove_field()
 
         # End of the N iterations
         # -----------------------
