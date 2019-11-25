@@ -89,9 +89,11 @@ class Simulation( PICMI_Simulation ):
             phi2_chirp = laser.phi2
             if phi2_chirp is None:
                 phi2_chirp = 0
+            polarization_angle = np.arctan2(laser.polarization_direction[1],
+                                            laser.polarization_direction[0])
             laser_profile = GaussianLaser( a0=laser.a0, waist=laser.waist,
                 z0=laser.centroid_position[-1], zf=laser.focal_position[-1],
-                tau=laser.duration, theta_pol=laser.polarization_angle,
+                tau=laser.duration, theta_pol=polarization_angle,
                 phi2_chirp=phi2_chirp )
         else:
             raise ValueError('Unknown laser profile: %s' %type(injection_method))
@@ -157,9 +159,14 @@ class Simulation( PICMI_Simulation ):
         # - For the case of a plasma defined in a gridded layout
         if (type(s.initial_distribution)==PICMI_AnalyticDistribution) and \
             (type(layout) == PICMI_GriddedLayout):
+            assert initialize_self_field == False
             import numexpr
+            density_expression = s.initial_distribution.density_expression
+            if s.density_scale is not None:
+                density_expression = "%f*(%s)" \
+                     %(s.density_scale, density_expression)
             def dens_func(z, r):
-                n = numexpr.evaluate(s.initial_distribution.density_expression)
+                n = numexpr.evaluate(density_expression)
                 return n
             p_nr = layout.n_macroparticle_per_cell[0]
             p_nt = layout.n_macroparticle_per_cell[1]
@@ -167,12 +174,13 @@ class Simulation( PICMI_Simulation ):
             fbpic_species = self.fbpic_sim.add_new_species(
                 q=s.charge, m=s.mass, n=1.,
                 dens_func=dens_func, p_nz=p_nz, p_nr=p_nr, p_nt=p_nt,
+                p_zmin=s.initial_distribution.lower_bound[-1],
+                p_zmax=s.initial_distribution.upper_bound[-1],
                 continuous_injection=s.initial_distribution.fill_in )
 
         # - For the case of a Gaussian beam
         elif (type(s.initial_distribution)==PICMI_GaussianBunchDistribution) \
              and (type(layout) == PICMI_PseudoRandomLayout):
-            assert initialize_self_field
             dist = s.initial_distribution
             gamma0_beta0 = dist.centroid_velocity[-1]/c
             gamma0 = ( 1 + gamma0_beta0**2 )**.5
@@ -189,13 +197,18 @@ class Simulation( PICMI_Simulation ):
             # Calculate size at focus and emittance
             sig_r0 = (sig_r**2 - (sig_vr*tf)**2)**0.5
             n_emit = gamma0 * sig_r0 * sig_vr/c
+            # Get the number of physical particles
+            n_physical_particles = dist.n_physical_particles
+            if s.density_scale is not None:
+                n_physical_particles *= s.density_scale
             fbpic_species = add_particle_bunch_gaussian( self.fbpic_sim,
                                 q=s.charge, m=s.mass,
                                 gamma0=gamma0, sig_gamma=sig_gamma,
                                 sig_r=sig_r0, sig_z=sig_z, n_emit=n_emit,
-                                n_physical_particles=dist.n_physical_particles,
+                                n_physical_particles=n_physical_particles,
                                 n_macroparticles=layout.n_macroparticles,
-                                zf=zf, tf=tf )
+                                zf=zf, tf=tf,
+                                initialize_self_field=initialize_self_field )
         else:
             raise ValueError('Unknown combination of layout and distribution')
 

@@ -11,7 +11,7 @@ This file steers and controls the simulation.
 # as it sets the cuda context)
 from fbpic.utils.mpi import MPI
 # Check if threading is available
-from .utils.threading import threading_enabled
+from .utils.threading import threading_enabled, numba_minor_version
 # Check if CUDA is available, then import CUDA functions
 from .utils.cuda import cuda_installed, cupy_installed
 if cuda_installed:
@@ -212,6 +212,11 @@ class Simulation(object):
                 'In order to run on GPUs, FBPIC version 0.13 and later \n'
                 'require the `cupy` package (version 6).\n'
                 'See the FBPIC documentation in order to install cupy.')
+        if self.use_cuda and numba_minor_version > 45:
+            raise RuntimeError(
+                'In order to run on GPU, please install numba version 0.45:\n'
+                '  conda install numba=0.45, or:\n'
+                '  pip install numba==0.45')
         # CPU multi-threading
         self.use_threading = threading_enabled
         if self.use_threading:
@@ -411,7 +416,12 @@ class Simulation(object):
                 static_field.add_field()
                 fld.spect2interp('E')
                 fld.spect2interp('B')
-                
+
+
+            # Keep field arrays sorted throughout gathering+push
+            for species in ptcl:
+                species.keep_fields_sorted = True
+
             # Gather the fields from the grid at t = n dt
             for species in ptcl:
                 species.gather( fld.interp )
@@ -419,7 +429,7 @@ class Simulation(object):
             for ext_field in self.external_fields:
                 ext_field.apply_expression( self.ptcl, self.time )
 
-            
+
             # Run the diagnostics
             # (after gathering ; allows output of gathered fields on particles)
             # (E, B, rho, x are defined at time n ; J, p at time n-1/2)
@@ -430,7 +440,7 @@ class Simulation(object):
                 diag.write( self.iteration )
             if freeze_field:
                 static_field.remove_field()
-                
+
             # Push the particles' positions and velocities to t = (n+1/2) dt
             if move_momenta:
                 for species in ptcl:
@@ -446,18 +456,22 @@ class Simulation(object):
             if self.use_galilean:
                 self.shift_galilean_boundaries( 0.5*dt )
 
+            # Handle elementary processes at t = (n + 1/2)dt
+            # i.e. when the particles' velocity and position are synchronized
+            # (e.g. ionization, Compton scattering, ...)
+            for species in ptcl:
+                species.handle_elementary_processes( self.time + 0.5*dt )
+
+            # Fields are not used beyond this point ; no need to keep sorted
+            for species in ptcl:
+                species.keep_fields_sorted = False
+
             # Get the current at t = (n+1/2) dt
             # (Guard cell exchange done either now or after current correction)
             self.deposit('J', exchange=(correct_currents is False))
             # Perform cross-deposition if needed
             if correct_currents and fld.current_correction=='cross-deposition':
                 self.cross_deposit( move_positions )
-
-            # Handle elementary processes at t = (n + 1/2)dt
-            # i.e. when the particles' velocity and position are synchronized
-            # (e.g. ionization, Compton scattering, ...)
-            for species in ptcl:
-                species.handle_elementary_processes( self.time + 0.5*dt )
 
             # Push the particles' positions to t = (n+1) dt
             if move_positions:
@@ -717,9 +731,10 @@ class Simulation(object):
         .. note::
 
             For the arguments below, it is recommended to have at least
-            ``p_nt = 4*Nm``, i.e. the required number of macroparticles
-            along `theta` (in order for the simulation to be properly resolved)
-            increases with the number of azimuthal modes used.
+            ``p_nt = 4*Nm`` (except in the case ``Nm=1``, for which
+            ``p_nt=1`` is sufficient). In other words, the required number of
+            macroparticles along `theta` (in order for the simulation to be
+            properly resolved) increases with the number of azimuthal modes used.
 
         Parameters
         ----------
