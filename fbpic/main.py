@@ -397,6 +397,7 @@ class Simulation(object):
             fld.erase('B')
             fld.interp2spect('E')
             fld.interp2spect('B')
+            static_field.remove_field()
 
 
 

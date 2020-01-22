@@ -13,6 +13,7 @@ class StaticField(object):
         self.sim = sim
         self.win = sim.comm.moving_win
         self.use_cuda = use_cuda
+        self.use_pml = sim.use_pml
         self.Nz = sim.fld.Nz
         self.Nr = sim.fld.Nr
         self.Nm = sim.fld.Nm
@@ -23,6 +24,11 @@ class StaticField(object):
         self.Bp = []
         self.Bm = []
         self.Bz = []
+        if self.use_pml:
+            self.Ep_pml = []
+            self.Em_pml = []
+            self.Bp_pml = []
+            self.Bm_pml = []
         self.vg = vg
         self.kz_true = 2*np.pi* np.fft.fftfreq( self.Nz, self.dz )
         #self.field_shift = np.exp(-1.j*kz_true*vg*sim.dt)
@@ -39,6 +45,11 @@ class StaticField(object):
             self.Bp.append(spect.Bp.copy())
             self.Bm.append(spect.Bm.copy())
             self.Bz.append(spect.Bz.copy())
+            if self.use_pml:
+                self.Ep_pml.append(spect.Ep_pml.copy())
+                self.Em_pml.append(spect.Em_pml.copy())
+                self.Bp_pml.append(spect.Bp_pml.copy())
+                self.Bm_pml.append(spect.Bm_pml.copy())
 
         if use_cuda:
             send_data_to_gpu(sim)
@@ -52,6 +63,11 @@ class StaticField(object):
             self.Bp[i] = cuda.to_device( self.Bp[i] )
             self.Bm[i] = cuda.to_device( self.Bm[i] )
             self.Bz[i] = cuda.to_device( self.Bz[i] )
+            if self.use_pml:
+                self.Ep_pml[i] = cuda.to_device(self.Ep_pml[i])
+                self.Em_pml[i] = cuda.to_device(self.Em_pml[i])
+                self.Bp_pml[i] = cuda.to_device(self.Bp_pml[i])
+                self.Bm_pml[i] = cuda.to_device(self.Bm_pml[i])
 
     def shift_field( self ):
         dt = self.sim.dt
@@ -74,6 +90,11 @@ class StaticField(object):
                 shift_spect_array_gpu[tpb, bpg]( self.Bp[i], shift, 1 )
                 shift_spect_array_gpu[tpb, bpg]( self.Bm[i], shift, 1 )
                 shift_spect_array_gpu[tpb, bpg]( self.Bz[i], shift, 1 )
+                if self.use_pml:
+                    shift_spect_array_gpu[tpb, bpg](self.Ep_pml[i], shift, 1)
+                    shift_spect_array_gpu[tpb, bpg](self.Em_pml[i], shift, 1)
+                    shift_spect_array_gpu[tpb, bpg](self.Bp_pml[i], shift, 1)
+                    shift_spect_array_gpu[tpb, bpg](self.Bm_pml[i], shift, 1)
             
         else:
             for i in range(self.Nm):
@@ -85,6 +106,11 @@ class StaticField(object):
                 shift_spect_array_cpu( self.Bp[i], shift, 1 )
                 shift_spect_array_cpu( self.Bm[i], shift, 1 )
                 shift_spect_array_cpu( self.Bz[i], shift, 1 )
+                if self.use_pml:
+                    shift_spect_array_cpu(self.Ep_pml[i], shift, 1)
+                    shift_spect_array_cpu(self.Em_pml[i], shift, 1)
+                    shift_spect_array_cpu(self.Bp_pml[i], shift, 1)
+                    shift_spect_array_cpu(self.Bm_pml[i], shift, 1)
 
 
 
@@ -104,12 +130,26 @@ class StaticField(object):
                                self.Ep[i], self.Em[i], self.Ez[i],
                                self.Bp[i], self.Bm[i], self.Bz[i],
                                self.Nz, self.Nr )
+                if self.use_pml:
+                    cuda_add_static_field_pml[dim_grid, dim_block](
+                        fld.Ep_pml, fld.Em_pml,
+                        fld.Bp_pml, fld.Bm_pml,
+                        self.Ep_pml[i], self.Em_pml[i],
+                        self.Bp_pml[i], self.Bm_pml[i],
+                        self.Nz, self.Nr)
             else:
                 cpu_add_static_field( fld.Ep, fld.Em, fld.Ez,
                                fld.Bp, fld.Bm, fld.Bz,
                                self.Ep[i], self.Em[i], self.Ez[i],
                                self.Bp[i], self.Bm[i], self.Bz[i],
                                self.Nz, self.Nr )
+                if self.use_pml:
+                    cpu_add_static_field_pml(
+                        fld.Ep_pml, fld.Em_pml,
+                        fld.Bp_pml, fld.Bm_pml,
+                        self.Ep_pml[i], self.Em_pml[i],
+                        self.Bp_pml[i], self.Bm_pml[i],
+                        self.Nz, self.Nr)
 
     def remove_field( self ):
         # Delete E and B in mode 1
@@ -125,12 +165,26 @@ class StaticField(object):
                                self.Ep[i], self.Em[i], self.Ez[i],
                                self.Bp[i], self.Bm[i], self.Bz[i],
                                self.Nz, self.Nr )
+                if self.use_pml:
+                    cuda_remove_static_field_pml[dim_grid, dim_block](
+                        fld.Ep_pml, fld.Em_pml,
+                        fld.Bp_pml, fld.Bm_pml,
+                        self.Ep_pml[i], self.Em_pml[i],
+                        self.Bp_pml[i], self.Bm_pml[i],
+                        self.Nz, self.Nr)
             else:
                 cpu_remove_static_field( fld.Ep, fld.Em, fld.Ez,
                                fld.Bp, fld.Bm, fld.Bz,
                                self.Ep[i], self.Em[i], self.Ez[i],
                                self.Bp[i], self.Bm[i], self.Bz[i],
                                self.Nz, self.Nr )
+                if self.use_pml:
+                    cpu_remove_static_field_pml(
+                        fld.Ep_pml, fld.Em_pml,
+                        fld.Bp_pml, fld.Bm_pml,
+                        self.Ep_pml[i], self.Em_pml[i],
+                        self.Bp_pml[i], self.Bm_pml[i],
+                        self.Nz, self.Nr)
 
 if cuda_installed:
     @cuda.jit
@@ -149,6 +203,21 @@ if cuda_installed:
             Bm[iz, ir] = Bms[iz, ir]
             Bz[iz, ir] = Bzs[iz, ir]
 
+if cuda_installed:
+    @cuda.jit
+    def cuda_add_static_field_pml( Ep, Em, Bp, Bm,
+                               Eps, Ems, Bps, Bms,
+                               Nz, Nr):
+        # Cuda 2D grid
+        iz, ir = cuda.grid(2)
+
+        if (iz < Nz) and (ir < Nr) :
+
+            Ep[iz, ir] = Eps[iz, ir]
+            Em[iz, ir] = Ems[iz, ir]
+            Bp[iz, ir] = Bps[iz, ir]
+            Bm[iz, ir] = Bms[iz, ir]
+
 def cpu_add_static_field( Ep, Em, Ez, Bp, Bm, Bz,
                            Eps, Ems, Ezs, Bps, Bms, Bzs,
                            Nz, Nr):
@@ -159,6 +228,15 @@ def cpu_add_static_field( Ep, Em, Ez, Bp, Bm, Bz,
         Bp[:,:] = Bps[:,:]
         Bm[:,:] = Bms[:,:]
         Bz[:,:] = Bzs[:,:]
+
+
+def cpu_add_static_field_pml(Ep, Em, Bp, Bm,
+                         Eps, Ems, Bps, Bms,
+                         Nz, Nr):
+    Ep[:, :] = Eps[:, :]
+    Em[:, :] = Ems[:, :]
+    Bp[:, :] = Bps[:, :]
+    Bm[:, :] = Bms[:, :]
 
 if cuda_installed:
     @cuda.jit
@@ -184,6 +262,22 @@ if cuda_installed:
             Bm[iz, ir] *= 0
             Bz[iz, ir] *= 0
 
+if cuda_installed:
+    @cuda.jit
+    def cuda_remove_static_field_pml( Ep, Em, Bp, Bm,
+                               Eps, Ems, Bps, Bms,
+                               Nz, Nr):
+        # Cuda 2D grid
+        iz, ir = cuda.grid(2)
+
+        if (iz < Nz) and (ir < Nr) :
+
+
+            Ep[iz, ir] *= 0
+            Em[iz, ir] *= 0
+            Bp[iz, ir] *= 0
+            Bm[iz, ir] *= 0
+
 def cpu_remove_static_field( Ep, Em, Ez, Bp, Bm, Bz,
                            Eps, Ems, Ezs, Bps, Bms, Bzs,
                            Nz, Nr):
@@ -201,3 +295,14 @@ def cpu_remove_static_field( Ep, Em, Ez, Bp, Bm, Bz,
         Bp *= 0
         Bm *= 0
         Bz *= 0
+
+
+def cpu_remove_static_field_pml(Ep, Em, Bp, Bm,
+                            Eps, Ems, Bps, Bms,
+                            Nz, Nr):
+
+
+    Ep *= 0
+    Em *= 0
+    Bp *= 0
+    Bm *= 0
