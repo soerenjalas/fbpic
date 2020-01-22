@@ -57,8 +57,12 @@ def set_periodic_checkpoint( sim, period, checkpoint_dir='./checkpoints' ):
     write_dir = os.path.join(checkpoint_dir, 'proc%d/' %comm.rank)
 
     # Register a periodic FieldDiagnostic in the diagnostics of the simulation
+    # This saves only the E and B field (and their PML components, if used)
+    fieldtypes = ["E", "B"]
+    if sim.use_pml:
+        fieldtypes += ["Er_pml", "Et_pml", "Br_pml", "Bt_pml"]
     sim.checkpoints.append( FieldDiagnostic( period, sim.fld,
-                        fieldtypes=["E", "B"], write_dir=write_dir ) )
+                        fieldtypes=fieldtypes, write_dir=write_dir ) )
 
     # Register a periodic ParticleDiagnostic, which contains all
     # the particles which are present in the simulation
@@ -174,6 +178,11 @@ simulation or sim.ptcl = [] to remove them""".format(len(avail_species),
             for coord in ['r', 't', 'z']:
                 load_fields( sim.fld.interp[m], fieldtype,
                              coord, ts, iteration )
+        # Load the PML components if needed
+        if sim.use_pml:
+            for fieldtype in ['Er_pml', 'Et_pml', 'Br_pml', 'Bt_pml']:
+                load_fields(sim.fld.interp[m], fieldtype, None, ts, iteration)
+
     # Record position after restart (`zmin` is modified by `load_fields`)
     # and shift the global domain position in the BoundaryCommunicator
     zmin_new = sim.fld.interp[0].zmin
@@ -216,9 +225,10 @@ def load_fields( grid, fieldtype, coord, ts, iteration ):
        The object into which data should be loaded
 
     fieldtype: string
-       Either 'E', 'B', 'J' or 'rho'. Indicates which field to load.
+       Either 'E', 'B', 'J', 'rho', or 'Er_pml', 'Et_pml', etc.
+       Indicates which field to load.
 
-    coord: string
+    coord: string or None
        Either 'r', 't' or 'z'. Indicates which field to load.
 
     ts: an OpenPMDTimeSeries object
