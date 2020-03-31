@@ -1,5 +1,25 @@
 # Change Log / Release Log for fbpic
 
+## 0.16.0
+
+This release uses `cupy` much more extensively in FBPIC, when running on GPU.
+As a result, kernel launch overheads are drastically reduced, and small-size
+or mid-size simulations will see a significant speed-up. Another consequence
+is that FBPIC now requires Python 3 in order to run on GPU.
+
+See [#437](https://github.com/fbpic/fbpic/pull/437) for more details.
+
+## 0.15.1
+
+This is a minor release, that makes improvements to the PML and to the documentation.
+
+- The PML should now be slightly faster on GPU (due to the suppression of
+unnecessary host-device communications: see [#423](https://github.com/fbpic/fbpic/pull/423))
+- The particles do not gather the fields in the PML anymore: see [#424](https://github.com/fbpic/fbpic/pull/424).
+- The documentation has a new section on 3D rendering: see [#426](https://github.com/fbpic/fbpic/pull/426).
+- The documentation and code of FBPIC is now compatible with `openPMD-viewer 1.0.0`: see [#428](https://github.com/fbpic/fbpic/pull/428)
+and [#427](https://github.com/fbpic/fbpic/pull/427).
+
 ## 0.15.0
 
 This release adds the possibility to add Perfectly-Matched Layers in the

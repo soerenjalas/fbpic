@@ -11,6 +11,7 @@ from fbpic.fields import Fields
 from fbpic.particles.elementary_process.cuda_numba_utils import \
     reallocate_and_copy_old
 from fbpic.particles.injection import BallisticBeforePlane
+from fbpic.utils.cuda import GpuMemoryManager
 import warnings
 
 
@@ -381,12 +382,21 @@ def add_particle_bunch_openPMD( sim, q, m, ts_path, z_off=0., species=None,
        Whether to calculate the initial space charge fields of the bunch
        and add these fields to the fields on the grid (Default: True)
     """
-    # Import openPMD viewer
+    # Try to import openPMD-viewer, version 1
     try:
-        from opmd_viewer import OpenPMDTimeSeries
+        from openpmd_viewer import OpenPMDTimeSeries
+        openpmd_viewer_version = 1
     except ImportError:
+        # If not available, try to import openPMD-viewer, version 0
+        try:
+            from opmd_viewer import OpenPMDTimeSeries
+            openpmd_viewer_version = 0
+        except ImportError:
+            openpmd_viewer_version = None
+    # Otherwise, raise an error
+    if openpmd_viewer_version is None:
         raise ImportError(
-        'The package `opmd_viewer` is required to restart from checkpoints.'
+        'The package openPMD-viewer is required to load a particle bunch from on openPMD file.'
         '\nPlease install it from https://github.com/openPMD/openPMD-viewer')
     ts = OpenPMDTimeSeries(ts_path)
     # Extract phasespace and particle weights
@@ -394,10 +404,11 @@ def add_particle_bunch_openPMD( sim, q, m, ts_path, z_off=0., species=None,
                                 ['x', 'y', 'z', 'ux', 'uy', 'uz', 'w'],
                                 iteration=iteration, species=species,
                                 select=select)
-    # Convert the positions from microns to meters
-    x *= 1.e-6
-    y *= 1.e-6
-    z *= 1.e-6
+    if openpmd_viewer_version == 0:
+        # Convert the positions from microns to meters
+        x *= 1.e-6
+        y *= 1.e-6
+        z *= 1.e-6
     # Shift the center of the phasespace to z_off
     z = z - np.average(z, weights=w) + z_off
 
@@ -825,10 +836,12 @@ def get_space_charge_fields( sim, ptcl, direction='forward' ):
         gamma = w_gamma_sum/w_sum
 
     # Project the charge and currents onto the local subdomain
-    sim.deposit( 'rho', exchange=True, species_list=[ptcl],
-                    update_spectral=False )
-    sim.deposit( 'J', exchange=True, species_list=[ptcl],
-                    update_spectral=False )
+    # (Move data to GPU if needed, for this step)
+    with GpuMemoryManager(sim):
+        sim.deposit( 'rho', exchange=True, species_list=[ptcl],
+                        update_spectral=False )
+        sim.deposit( 'J', exchange=True, species_list=[ptcl],
+                        update_spectral=False )
 
     # Create a global field object across all subdomains, and copy the sources
     # (Space-charge calculation is a global operation)
