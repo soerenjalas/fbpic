@@ -2,6 +2,7 @@ from scipy.constants import c
 import numpy as np
 from fbpic.boundaries.moving_window import shift_spect_array_cpu
 from fbpic.utils.cuda import cuda_installed
+from fbpic.utils.cuda import compile_cupy
 if cuda_installed:
     from fbpic.utils.cuda import cuda, cuda_tpb_bpg_2d, send_data_to_gpu, receive_data_from_gpu
     from fbpic.boundaries.moving_window import shift_spect_array_gpu
@@ -187,7 +188,7 @@ class StaticField(object):
                         self.Nz, self.Nr)
 
 if cuda_installed:
-    @cuda.jit
+    @compile_cupy
     def cuda_add_static_field( Ep, Em, Ez, Bp, Bm, Bz,
                                Eps, Ems, Ezs, Bps, Bms, Bzs,
                                Nz, Nr):
@@ -204,7 +205,7 @@ if cuda_installed:
             Bz[iz, ir] = Bzs[iz, ir]
 
 if cuda_installed:
-    @cuda.jit
+    @compile_cupy
     def cuda_add_static_field_pml( Ep, Em, Bp, Bm,
                                Eps, Ems, Bps, Bms,
                                Nz, Nr):
@@ -239,7 +240,7 @@ def cpu_add_static_field_pml(Ep, Em, Bp, Bm,
     Bm[:, :] = Bms[:, :]
 
 if cuda_installed:
-    @cuda.jit
+    @compile_cupy
     def cuda_remove_static_field( Ep, Em, Ez, Bp, Bm, Bz,
                                Eps, Ems, Ezs, Bps, Bms, Bzs,
                                Nz, Nr):
@@ -263,7 +264,7 @@ if cuda_installed:
             Bz[iz, ir] *= 0
 
 if cuda_installed:
-    @cuda.jit
+    @compile_cupy
     def cuda_remove_static_field_pml( Ep, Em, Bp, Bm,
                                Eps, Ems, Bps, Bms,
                                Nz, Nr):
