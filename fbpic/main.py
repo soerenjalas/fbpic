@@ -403,6 +403,11 @@ class Simulation(object):
             fld.interp2spect('E')
             fld.interp2spect('B')
             static_field.remove_field()
+        if freeze_field:
+                static_field.shift_field()
+                static_field.add_field()
+                fld.spect2interp('E')
+                fld.spect2interp('B')
 
 
 
@@ -453,11 +458,7 @@ class Simulation(object):
 
             # Main PIC iteration
             # ------------------
-            if freeze_field:
-                static_field.shift_field()
-                static_field.add_field()
-                fld.spect2interp('E')
-                fld.spect2interp('B')
+            
 
 
             # Keep field arrays sorted throughout gathering+push
@@ -555,6 +556,11 @@ class Simulation(object):
             # - Damp fields in damping cells
             # - Update the fields in interpolation space
             #  (needed for the field gathering at the next iteration)
+            if freeze_field:
+                static_field.shift_field()
+                static_field.add_field()
+                #fld.spect2interp('E')
+                #fld.spect2interp('B')
             self.exchange_and_damp_EB()
 
             # Increment the global time and iteration
@@ -563,13 +569,13 @@ class Simulation(object):
 
             # Write the checkpoints if needed
             for checkpoint in self.checkpoints:
-                if freeze_field:
-                    static_field.add_field()
-                    fld.spect2interp('E')
-                    fld.spect2interp('B')
+                #if freeze_field:
+                #    static_field.add_field()
+                #    fld.spect2interp('E')
+                #    fld.spect2interp('B')
                 checkpoint.write( self.iteration )
-                if freeze_field:
-                    static_field.remove_field()
+                #if freeze_field:
+                #    static_field.remove_field()
 
         # End of the N iterations
         # -----------------------

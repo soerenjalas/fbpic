@@ -3,6 +3,7 @@ import numpy as np
 from fbpic.boundaries.moving_window import shift_spect_array_cpu
 from fbpic.utils.cuda import cuda_installed
 from fbpic.utils.cuda import compile_cupy
+import cupy
 if cuda_installed:
     from fbpic.utils.cuda import cuda, cuda_tpb_bpg_2d, send_data_to_gpu, receive_data_from_gpu
     from fbpic.boundaries.moving_window import shift_spect_array_gpu
@@ -34,7 +35,7 @@ class StaticField(object):
         self.kz_true = 2*np.pi* np.fft.fftfreq( self.Nz, self.dz )
         #self.field_shift = np.exp(-1.j*kz_true*vg*sim.dt)
         #if use_cuda:
-        #    self.d_field_shift = cuda.to_device( self.field_shift )
+        #    self.d_field_shift = cupy.asarray( self.field_shift )
 
         if use_cuda:
             receive_data_from_gpu(sim)
@@ -57,18 +58,20 @@ class StaticField(object):
             self.send_to_gpu()
 
     def send_to_gpu( self ):
-        for i in range(self.Nm):
-            self.Ep[i] = cuda.to_device( self.Ep[i] )
-            self.Em[i] = cuda.to_device( self.Em[i] )
-            self.Ez[i] = cuda.to_device( self.Ez[i] )
-            self.Bp[i] = cuda.to_device( self.Bp[i] )
-            self.Bm[i] = cuda.to_device( self.Bm[i] )
-            self.Bz[i] = cuda.to_device( self.Bz[i] )
+        iN = [1]
+        #for i in range(self.Nm):
+        for i in iN:
+            self.Ep[i] = cupy.asarray( self.Ep[i] )
+            self.Em[i] = cupy.asarray( self.Em[i] )
+            self.Ez[i] = cupy.asarray( self.Ez[i] )
+            self.Bp[i] = cupy.asarray( self.Bp[i] )
+            self.Bm[i] = cupy.asarray( self.Bm[i] )
+            self.Bz[i] = cupy.asarray( self.Bz[i] )
             if self.use_pml:
-                self.Ep_pml[i] = cuda.to_device(self.Ep_pml[i])
-                self.Em_pml[i] = cuda.to_device(self.Em_pml[i])
-                self.Bp_pml[i] = cuda.to_device(self.Bp_pml[i])
-                self.Bm_pml[i] = cuda.to_device(self.Bm_pml[i])
+                self.Ep_pml[i] = cupy.asarray(self.Ep_pml[i])
+                self.Em_pml[i] = cupy.asarray(self.Em_pml[i])
+                self.Bp_pml[i] = cupy.asarray(self.Bp_pml[i])
+                self.Bm_pml[i] = cupy.asarray(self.Bm_pml[i])
 
     def shift_field( self ):
         dt = self.sim.dt
@@ -76,12 +79,14 @@ class StaticField(object):
         self.field_shift = np.exp(-1.j*self.kz_true*(self.vg*dt-shift))
 
         if self.use_cuda:
-            self.d_field_shift = cuda.to_device( self.field_shift )
+            self.d_field_shift = cupy.asarray( self.field_shift )
             # Get a 2D CUDA grid of the size of the grid
             tpb, bpg = cuda_tpb_bpg_2d( self.Ep[0].shape[0],
                                             self.Ep[0].shape[1] )
             shift = self.d_field_shift
-            for i in range(self.Nm):
+            iN = [1]
+            #for i in range(self.Nm):
+            for i in iN:
                 
 
                 # Shift all the fields on the GPU
