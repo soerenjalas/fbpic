@@ -1,5 +1,112 @@
 # Change Log / Release Log for fbpic
 
+## 0.20.3
+
+This is a bug-fix release. It improves FBPIC's compatibility with recent
+versions of some of the software dependencies (namely `numba` and `mkl`).
+
+- The latest version of `numba` (`numba 0.53.`) raised numerous warnings
+when running previous versions of FBPIC on GPU. These warnings do not appear
+anymore with this new release. (See [#538](https://github.com/fbpic/fbpic/pull/538))
+
+- FBPIC can use the MKL distribution from `conda`, but was unable to use
+the MKL distribution from `pip`. This is now fixed.
+(See [#537](https://github.com/fbpic/fbpic/pull/537))
+
+## 0.20.2
+
+This is a bug-fix release. It allows FBPIC to run with the latest
+`cupy` version (`cupy 9.0.0`) on GPU
+(see [#532](https://github.com/fbpic/fbpic/pull/532)).
+
+## 0.20.1
+
+This is a bug-fix release. It fixes errors that in detecting the GPU UUID on
+some plateforms (see [#529](https://github.com/fbpic/fbpic/pull/529)).
+
+## 0.20.0
+
+This release introduces several improvements and bug fixes.
+
+Better handling of multiple GPUs on clusters:
+- The attribution of individual GPUs to the different MPI ranks is more robust,
+  and avoids oversubscribing certain GPUs while leaving others idle (see
+  [#523](https://github.com/fbpic/fbpic/issues/523)).
+  In addition, GPU oversubscription is now automatically detected, and
+  a corresponding error message is printed. (see [#524](https://github.com/fbpic/fbpic/issues/524))
+- Out-of-memory error are handled more properly, and will abort multi-GPU
+  simulations whenever they are encountered by one of the GPUs. (see
+  [#521](https://github.com/fbpic/fbpic/issues/521))
+- The hostname is now printed even for single-rank simulation. (see
+  [#495](https://github.com/fbpic/fbpic/issues/495))
+- Kernel launch parameters have been fine-tuned for A100 architecture. (see
+  [#525](https://github.com/fbpic/fbpic/issues/525))
+
+Bug fixes:
+- The external fields used to be applied to all species, instead of the
+  species specified by the user. This is now fixed. (see
+  [#498](https://github.com/fbpic/fbpic/issues/498))
+- The installation instructions were updated. (see
+  [#515](https://github.com/fbpic/fbpic/issues/515))
+
+New features:
+- Added a `Mirror` class to block the propagation of the laser e.g. in
+  multi-stage simuations. (see [#507](https://github.com/fbpic/fbpic/issues/507))
+
+## 0.19.1
+
+This release incorporates a small fix that allows the code to compile with
+Python 3.8. (see [#488](https://github.com/fbpic/fbpic/issues/488))
+
+## 0.19.0
+
+This release makes the computation of the laser profiles faster, in particular
+in the case when the laser is emitted with the antenna and the profile
+thus needs to be computed at every time step.
+
+- When using the laser antenna, the laser profile can now be computed on
+GPU, if the profile has the flag `gpu_capable=True`.
+(see [#473](https://github.com/fbpic/fbpic/pull/473))
+- The flattened Gaussian laser was refactored and is now much faster to
+compute. (see [#486](https://github.com/fbpic/fbpic/pull/486))
+
+## 0.18.0
+
+This release allows FBPIC to run on GPU with the latest version
+of `numba`, by resolving a minor compatibility issue
+(see [#482](https://github.com/fbpic/fbpic/pull/482)).
+
+It also makes the `ExternalField` faster on GPU (see [#470](https://github.com/fbpic/fbpic/pull/470)).
+
+## 0.17.1
+
+This minor release removes restrictions on the use of recent versions of
+numba, when running on GPU.
+
+## 0.17.0
+
+This release introduces a major change to the treatment of particles close to
+the axis (see [#347](https://github.com/fbpic/fbpic/pull/347)).
+As a result, the code is much more robust when a large amount of
+particles simultaneously cross the axis, and concentrate in the very first
+cell, in the radial direction.
+
+In particular, this avoids problems in PWFA simulations when particles of the
+driver can periodically pinch on the axis. In addition, the details of the
+fields at the very tip of the bubble (where sheath electrons cross the axis)
+are more realistic. As a result of the new treatment of particles, users may
+notice that the charge density deposited on the grid, for a uniform
+distribution of particles, appears to have a slight non-uniformity near the
+axis. This is a known and expected effect, and can be reduced by increasing
+the number of macro-particles in the radial direction (p_nr).
+
+In addition to the above major change, a set of minor changes were introduced:
+- JIT functions are now cached when running on CPU, which reduces the
+  compilation time ([#451](https://github.com/fbpic/fbpic/pull/451) and
+  [#445](https://github.com/fbpic/fbpic/pull/445))
+- The new release fixes a bug that prevented the code to run on CPU, when
+a GPU is available ([#454](https://github.com/fbpic/fbpic/pull/454)).
+
 ## 0.16.1
 
 This is minor release of FBPIC, with essentially two improvements:

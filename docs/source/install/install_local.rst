@@ -5,8 +5,8 @@ Installing FBPIC
 ------------------
 
 The installation requires the
-`Anaconda <https://www.continuum.io/why-anaconda>`__ distribution of
-Python. If Anaconda is not your default Python distribution, download and install it from `here <https://www.continuum.io/downloads>`__.
+`Anaconda <https://docs.anaconda.com/anaconda/>`__ distribution of
+Python. If Anaconda is not your default Python distribution, download and install it from `here <https://docs.anaconda.com/anaconda/install/>`__.
 
 **Installation steps**:
 
@@ -44,7 +44,7 @@ Python. If Anaconda is not your default Python distribution, download and instal
        In the above command, you should choose a CUDA version that is **compatible
        with your GPU driver**. You can see the version of your GPU driver by typing
        the command ``nvidia-smi``. You can then find the compatible CUDA
-       versions using `this table <https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html#major-components__table-cuda-toolkit-driver-versions>`__.
+       versions using `this table <https://docs.nvidia.com/deploy/cuda-compatibility/index.html#binary-compatibility__table-toolkit-driver>`__.
 
 -  **Optional:** In order to run on a CPU which is **not** an Intel model, you need to install `pyfftw`, in order to replace the MKL FFT:
 
