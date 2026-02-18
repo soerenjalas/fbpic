@@ -1310,8 +1310,9 @@ def deposit_J_gpu_unsorted_rel_cubic_m3(x, y, z, w, q,
             cos = 1.
             sin = 0.
 
-        exp1 = cos + 1.j*sin
-        exp2 = exp1*exp1
+        # Trig recurrences for m=1 and m=2
+        cos2 = cos*cos - sin*sin
+        sin2 = 2.*cos*sin
 
         r_cell = invdr*(rj - rmin) - 0.5
         z_cell = invdz*(zj - zmin) - 0.5
@@ -1386,13 +1387,21 @@ def deposit_J_gpu_unsorted_rel_cubic_m3(x, y, z, w, q,
         jt0 = base * (cos*uyj - sin*uxj)
         jz0 = base * uzj
 
-        jr1 = jr0 * exp1
-        jt1 = jt0 * exp1
-        jz1 = jz0 * exp1
+        # m=1 components
+        jr1_r = jr0 * cos
+        jr1_i = jr0 * sin
+        jt1_r = jt0 * cos
+        jt1_i = jt0 * sin
+        jz1_r = jz0 * cos
+        jz1_i = jz0 * sin
 
-        jr2 = jr0 * exp2
-        jt2 = jt0 * exp2
-        jz2 = jz0 * exp2
+        # m=2 components
+        jr2_r = jr0 * cos2
+        jr2_i = jr0 * sin2
+        jt2_r = jt0 * cos2
+        jt2_i = jt0 * sin2
+        jz2_r = jz0 * cos2
+        jz2_i = jz0 * sin2
 
         for ia in range(4):
             izp = izs[ia]
@@ -1407,35 +1416,26 @@ def deposit_J_gpu_unsorted_rel_cubic_m3(x, y, z, w, q,
                 w_z1 = sz * Sr_z1[ib]
                 w_z2 = sz * Sr_z2[ib]
 
-                vjr0 = w_rt0 * jr0
-                vjt0 = w_rt0 * jt0
-                vjz0 = w_z0  * jz0
+                # m=0 (real only)
+                cuda.atomic.add(j_r_m0.real, (izp, irp), w_rt0 * jr0)
+                cuda.atomic.add(j_t_m0.real, (izp, irp), w_rt0 * jt0)
+                cuda.atomic.add(j_z_m0.real, (izp, irp), w_z0  * jz0)
 
-                vjr1 = w_rt1 * jr1
-                vjt1 = w_rt1 * jt1
-                vjz1 = w_z1  * jz1
+                # m=1
+                cuda.atomic.add(j_r_m1.real, (izp, irp), w_rt1 * jr1_r)
+                cuda.atomic.add(j_r_m1.imag, (izp, irp), w_rt1 * jr1_i)
+                cuda.atomic.add(j_t_m1.real, (izp, irp), w_rt1 * jt1_r)
+                cuda.atomic.add(j_t_m1.imag, (izp, irp), w_rt1 * jt1_i)
+                cuda.atomic.add(j_z_m1.real, (izp, irp), w_z1  * jz1_r)
+                cuda.atomic.add(j_z_m1.imag, (izp, irp), w_z1  * jz1_i)
 
-                vjr2 = w_rt2 * jr2
-                vjt2 = w_rt2 * jt2
-                vjz2 = w_z2  * jz2
-
-                cuda.atomic.add(j_r_m0.real, (izp, irp), vjr0.real)
-                cuda.atomic.add(j_t_m0.real, (izp, irp), vjt0.real)
-                cuda.atomic.add(j_z_m0.real, (izp, irp), vjz0.real)
-
-                cuda.atomic.add(j_r_m1.real, (izp, irp), vjr1.real)
-                cuda.atomic.add(j_r_m1.imag, (izp, irp), vjr1.imag)
-                cuda.atomic.add(j_t_m1.real, (izp, irp), vjt1.real)
-                cuda.atomic.add(j_t_m1.imag, (izp, irp), vjt1.imag)
-                cuda.atomic.add(j_z_m1.real, (izp, irp), vjz1.real)
-                cuda.atomic.add(j_z_m1.imag, (izp, irp), vjz1.imag)
-
-                cuda.atomic.add(j_r_m2.real, (izp, irp), vjr2.real)
-                cuda.atomic.add(j_r_m2.imag, (izp, irp), vjr2.imag)
-                cuda.atomic.add(j_t_m2.real, (izp, irp), vjt2.real)
-                cuda.atomic.add(j_t_m2.imag, (izp, irp), vjt2.imag)
-                cuda.atomic.add(j_z_m2.real, (izp, irp), vjz2.real)
-                cuda.atomic.add(j_z_m2.imag, (izp, irp), vjz2.imag)
+                # m=2
+                cuda.atomic.add(j_r_m2.real, (izp, irp), w_rt2 * jr2_r)
+                cuda.atomic.add(j_r_m2.imag, (izp, irp), w_rt2 * jr2_i)
+                cuda.atomic.add(j_t_m2.real, (izp, irp), w_rt2 * jt2_r)
+                cuda.atomic.add(j_t_m2.imag, (izp, irp), w_rt2 * jt2_i)
+                cuda.atomic.add(j_z_m2.real, (izp, irp), w_z2  * jz2_r)
+                cuda.atomic.add(j_z_m2.imag, (izp, irp), w_z2  * jz2_i)
 
 
 @compile_cupy
