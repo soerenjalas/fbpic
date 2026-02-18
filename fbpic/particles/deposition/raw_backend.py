@@ -8,9 +8,11 @@ import cupy
 
 
 # NOTE:
-# - Output J arrays are complex128 in Python, but this kernel treats them as
-#   raw double* buffers with interleaved [real, imag].
-# - Only the fused unsorted relativistic cubic Nm=3 J path is implemented.
+# - Output arrays are complex128 in Python, but kernels treat them as raw
+#   double* buffers with interleaved [real, imag].
+# - Implemented paths:
+#   * fused unsorted relativistic cubic J deposition for Nm=3
+#   * fused unsorted cubic rho deposition for Nm=3
 _RAW_KERNEL_SRC = r'''
 extern "C" {
 
@@ -60,6 +62,142 @@ __device__ __forceinline__ double Sr_cubic(
         s *= (double)flip;
     }
     return s;
+}
+
+__global__ void deposit_rho_gpu_unsorted_cubic_m3_raw(
+    const double* x,
+    const double* y,
+    const double* z,
+    const double* w,
+    const double q,
+    const double invdz,
+    const double zmin,
+    const int Nz,
+    const double invdr,
+    const double rmin,
+    const int Nr,
+    double* rho_m0,
+    double* rho_m1,
+    double* rho_m2,
+    const double* beta_n_m0,
+    const double* beta_n_m1,
+    const double* beta_n_m2,
+    const int Ntot)
+{
+    int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (i >= Ntot) {
+        return;
+    }
+
+    const double xj = x[i];
+    const double yj = y[i];
+    const double zj = z[i];
+    const double wj = q * w[i];
+
+    const double rj = sqrt(xj*xj + yj*yj);
+    double cs, sn;
+    if (rj != 0.0) {
+        const double invr = 1.0/rj;
+        cs = xj*invr;
+        sn = yj*invr;
+    }
+    else {
+        cs = 1.0;
+        sn = 0.0;
+    }
+
+    const double cs2 = cs*cs - sn*sn;
+    const double sn2 = 2.0*cs*sn;
+
+    const double r_cell = invdr*(rj - rmin) - 0.5;
+    const double z_cell = invdz*(zj - zmin) - 0.5;
+
+    const int ir = min((int)ceil(r_cell), Nr);
+    int iz = (int)ceil(z_cell);
+    if (iz < 0) {
+        iz += Nz;
+    }
+    else if (iz >= Nz) {
+        iz -= Nz;
+    }
+
+    int iz0 = iz - 2;
+    int iz1 = iz - 1;
+    int iz2 = iz;
+    int iz3 = iz + 1;
+    if (iz0 < 0) iz0 += Nz;
+    if (iz1 < 0) iz1 += Nz;
+    if (iz3 > Nz-1) iz3 -= Nz;
+
+    int ir0 = ir - 2;
+    int ir1 = min(ir - 1, Nr - 1);
+    int ir2 = min(ir, Nr - 1);
+    int ir3 = min(ir + 1, Nr - 1);
+    if (ir0 < 0) ir0 = -(1 + ir0);
+    if (ir1 < 0) ir1 = -(1 + ir1);
+
+    const double bn0 = beta_n_m0[ir];
+    const double bn1 = beta_n_m1[ir];
+    const double bn2 = beta_n_m2[ir];
+
+    const double Sz0 = Sz_cubic(z_cell, 0);
+    const double Sz1 = Sz_cubic(z_cell, 1);
+    const double Sz2 = Sz_cubic(z_cell, 2);
+    const double Sz3 = Sz_cubic(z_cell, 3);
+
+    const double Sr00 = Sr_cubic(r_cell, 0,  1, bn0);
+    const double Sr01 = Sr_cubic(r_cell, 1,  1, bn0);
+    const double Sr02 = Sr_cubic(r_cell, 2,  1, bn0);
+    const double Sr03 = Sr_cubic(r_cell, 3,  1, bn0);
+
+    const double Sr10 = Sr_cubic(r_cell, 0, -1, bn1);
+    const double Sr11 = Sr_cubic(r_cell, 1, -1, bn1);
+    const double Sr12 = Sr_cubic(r_cell, 2, -1, bn1);
+    const double Sr13 = Sr_cubic(r_cell, 3, -1, bn1);
+
+    const double Sr20 = Sr_cubic(r_cell, 0,  1, bn2);
+    const double Sr21 = Sr_cubic(r_cell, 1,  1, bn2);
+    const double Sr22 = Sr_cubic(r_cell, 2,  1, bn2);
+    const double Sr23 = Sr_cubic(r_cell, 3,  1, bn2);
+
+    const double R0 = wj;
+    const double R1_r = wj * cs;
+    const double R1_i = wj * sn;
+    const double R2_r = wj * cs2;
+    const double R2_i = wj * sn2;
+
+    const int izs[4] = {iz0, iz1, iz2, iz3};
+    const int irs[4] = {ir0, ir1, ir2, ir3};
+    const double Sz[4] = {Sz0, Sz1, Sz2, Sz3};
+
+    const double Sr0[4] = {Sr00, Sr01, Sr02, Sr03};
+    const double Sr1[4] = {Sr10, Sr11, Sr12, Sr13};
+    const double Sr2[4] = {Sr20, Sr21, Sr22, Sr23};
+
+    for (int ia = 0; ia < 4; ia++) {
+        const int izp = izs[ia];
+        const double sz = Sz[ia];
+
+        for (int ib = 0; ib < 4; ib++) {
+            const int irp = irs[ib];
+            const int idx2 = 2*(izp*Nr + irp);
+
+            const double w0 = sz * Sr0[ib];
+            const double w1 = sz * Sr1[ib];
+            const double w2 = sz * Sr2[ib];
+
+            // m=0 (real only)
+            atomicAdd(&rho_m0[idx2], w0 * R0);
+
+            // m=1
+            atomicAdd(&rho_m1[idx2],   w1 * R1_r);
+            atomicAdd(&rho_m1[idx2+1], w1 * R1_i);
+
+            // m=2
+            atomicAdd(&rho_m2[idx2],   w2 * R2_r);
+            atomicAdd(&rho_m2[idx2+1], w2 * R2_i);
+        }
+    }
 }
 
 __global__ void deposit_J_gpu_unsorted_rel_cubic_m3_raw(
@@ -263,19 +401,56 @@ __global__ void deposit_J_gpu_unsorted_rel_cubic_m3_raw(
 '''
 
 
-_raw_kernel = None
+_raw_module = None
+_raw_functions = {}
 
 
-def _get_raw_kernel():
-    global _raw_kernel
-    if _raw_kernel is None:
-        _raw_kernel = cupy.RawKernel(
-            _RAW_KERNEL_SRC,
-            'deposit_J_gpu_unsorted_rel_cubic_m3_raw',
+def _get_raw_function(kernel_name):
+    global _raw_module
+
+    fn = _raw_functions.get(kernel_name)
+    if fn is not None:
+        return fn
+
+    if _raw_module is None:
+        _raw_module = cupy.RawModule(
+            code=_RAW_KERNEL_SRC,
             options=('-std=c++11',),
             backend='nvrtc',
         )
-    return _raw_kernel
+
+    fn = _raw_module.get_function(kernel_name)
+    _raw_functions[kernel_name] = fn
+    return fn
+
+
+def launch_deposit_rho_gpu_unsorted_cubic_m3_raw(
+        dim_grid_1d, dim_block_1d,
+        x, y, z, w, q,
+        invdz, zmin, Nz,
+        invdr, rmin, Nr,
+        rho_m0, rho_m1, rho_m2,
+        beta_n_m0, beta_n_m1, beta_n_m2):
+    """Launch CuPy RawKernel for fused unsorted cubic rho (Nm=3)."""
+    kernel = _get_raw_function('deposit_rho_gpu_unsorted_cubic_m3_raw')
+
+    Ntot = np.int32(w.shape[0])
+    Nz_i = np.int32(Nz)
+    Nr_i = np.int32(Nr)
+
+    kernel(
+        (dim_grid_1d,),
+        (dim_block_1d,),
+        (
+            x, y, z, w,
+            np.float64(q),
+            np.float64(invdz), np.float64(zmin), Nz_i,
+            np.float64(invdr), np.float64(rmin), Nr_i,
+            rho_m0, rho_m1, rho_m2,
+            beta_n_m0, beta_n_m1, beta_n_m2,
+            Ntot,
+        ),
+    )
 
 
 def launch_deposit_J_gpu_unsorted_rel_cubic_m3_raw(
@@ -289,7 +464,7 @@ def launch_deposit_J_gpu_unsorted_rel_cubic_m3_raw(
         j_r_m2, j_t_m2, j_z_m2,
         beta_n_m0, beta_n_m1, beta_n_m2):
     """Launch CuPy RawKernel for fused unsorted relativistic cubic J (Nm=3)."""
-    kernel = _get_raw_kernel()
+    kernel = _get_raw_function('deposit_J_gpu_unsorted_rel_cubic_m3_raw')
 
     Ntot = np.int32(w.shape[0])
     Nz_i = np.int32(Nz)
