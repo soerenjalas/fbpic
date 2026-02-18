@@ -181,11 +181,26 @@ def make_gpu_sync(sim):
         return lambda: None
 
 
+def get_original_default_steps(args, dt):
+    """Return N_step from the original boosted-frame example formula."""
+    from fbpic.lpa_utils.boosted_frame import BoostConverter
+
+    boost = BoostConverter(args.gamma_boost)
+    p_zmax = args.ramp_up + args.plateau + args.ramp_down
+    L_interact = p_zmax - args.p_zmin
+    v_window = c * (1 - 0.5 * args.n_e / 1.75e27)
+    T_interact = boost.interaction_time(L_interact, (args.zmax - args.zmin), v_window)
+    return int(T_interact / dt)
+
+
 def run_benchmark(args):
     sim = build_simulation(args)
     sync = make_gpu_sync(sim)
 
     n_particles = sum(species.Ntot for species in sim.ptcl)
+    timed_steps = args.steps
+    if timed_steps is None:
+        timed_steps = get_original_default_steps(args, sim.dt)
 
     # Pre-cooking / warmup (not timed)
     if args.warmup_steps > 0:
@@ -194,19 +209,19 @@ def run_benchmark(args):
 
     # Timed steady-state section
     t0 = time.perf_counter()
-    sim.step(args.steps, show_progress=False)
+    sim.step(timed_steps, show_progress=False)
     sync()
     elapsed = time.perf_counter() - t0
 
     print("=== FBPIC Boosted Frame Benchmark (steady-state) ===")
     print(f"backend             : {'GPU' if sim.use_cuda else 'CPU'}")
     print(f"warmup_steps        : {args.warmup_steps}")
-    print(f"timed_steps         : {args.steps}")
+    print(f"timed_steps         : {timed_steps}")
     print(f"grid (Nz, Nr, Nm)   : ({args.Nz}, {args.Nr}, {args.Nm})")
     print(f"particle_shape      : {args.particle_shape}")
     print(f"particles (total)   : {n_particles}")
     print(f"timed runtime [s]   : {elapsed:.6f}")
-    print(f"time / step [s]     : {elapsed / args.steps:.6f}")
+    print(f"time / step [s]     : {elapsed / timed_steps:.6f}")
 
 
 def parse_args():
@@ -215,11 +230,16 @@ def parse_args():
     )
 
     # Timing
-    p.add_argument("--steps", type=int, default=40, help="number of timed steps")
+    p.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="number of timed steps (default: original boosted-frame N_step)",
+    )
     p.add_argument(
         "--warmup-steps",
         type=int,
-        default=5,
+        default=0,
         help="number of warmup (pre-cooking) steps before timing",
     )
 
@@ -227,17 +247,17 @@ def parse_args():
     p.add_argument("--cpu", dest="use_cuda", action="store_false", help="force CPU mode")
     p.set_defaults(use_cuda=True)
 
-    # Grid + algorithm
-    p.add_argument("--Nz", type=int, default=256)
-    p.add_argument("--Nr", type=int, default=96)
-    p.add_argument("--Nm", type=int, default=3)
+    # Grid + algorithm (defaults match docs/source/example_input/boosted_frame_script.py)
+    p.add_argument("--Nz", type=int, default=600)
+    p.add_argument("--Nr", type=int, default=75)
+    p.add_argument("--Nm", type=int, default=2)
     p.add_argument("--zmin", type=float, default=-30e-6)
     p.add_argument("--zmax", type=float, default=0.0)
     p.add_argument("--rmax", type=float, default=150e-6)
     p.add_argument("--dt", type=float, default=None)
-    p.add_argument("--n-order", type=int, default=16)
+    p.add_argument("--n-order", type=int, default=-1)
     p.add_argument("--gamma-boost", type=float, default=10.0)
-    p.add_argument("--particle-shape", choices=["linear", "cubic"], default="cubic")
+    p.add_argument("--particle-shape", choices=["linear", "cubic"], default="linear")
     p.add_argument("--exchange-period", type=int, default=None)
     p.add_argument(
         "--disable-cupy-mempool-free",

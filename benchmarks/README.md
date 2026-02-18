@@ -68,16 +68,26 @@ A boosted-frame benchmark for production-like timing runs that:
 3. Times only steady-state steps
 4. Attaches no diagnostics (`sim.diags = []`) to avoid output jitter
 
-### Run (GPU, steady-state)
+### Run (GPU, same defaults as original boosted example)
+
+```bash
+python benchmarks/boosted_frame_benchmark.py
+```
+
+### Run (GPU, steady-state with pre-cooking)
 
 ```bash
 python benchmarks/boosted_frame_benchmark.py \
-  --warmup-steps 5 --steps 40
+  --warmup-steps 5
 ```
 
 ### Notes
 
-- This script is intended for **steady-state throughput** comparisons between commits.
+- Running with no args now matches the defaults from
+  `docs/source/example_input/boosted_frame_script.py`
+  (including grid and default `N_step` formula).
+- `--steps` overrides the timed step count; by default it uses the original
+  boosted-frame `N_step` expression.
 - Warmup is excluded from timed runtime.
 - You can still control kernel behavior with environment variables (e.g.
   `FBPIC_USE_UNSORTED_J_DEPOSITION`, `FBPIC_INLINE_PARTICLE_SHAPES`, etc.)
