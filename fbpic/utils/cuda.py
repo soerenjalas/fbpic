@@ -450,6 +450,7 @@ if cuda_installed:
             # Optional compile option for all CUDA kernels created through
             # this decorator. Disabled by default to preserve strict behavior.
             self.fastmath = _env_flag('FBPIC_CUDA_FASTMATH', default=False)
+            self.max_registers = _read_positive_int_env('FBPIC_CUDA_MAX_REGISTERS')
 
             # Flag to save whether the kernel has been explicitly specialized
             self.is_specialized = False
@@ -504,7 +505,10 @@ if cuda_installed:
 
             # Compile a Numba kernel for the given signature
             # using cuda.jit
-            numba_kernel = cuda.jit(signature, fastmath=self.fastmath)(self.python_func)
+            jit_kwargs = {'fastmath': self.fastmath}
+            if self.max_registers is not None:
+                jit_kwargs['max_registers'] = self.max_registers
+            numba_kernel = cuda.jit(signature, **jit_kwargs)(self.python_func)
 
             # Convert the kernel into a cupy kernel
             self.specialized_kernel = self.make_cupy_kernel( numba_kernel )
@@ -571,7 +575,10 @@ if cuda_installed:
 
                         # Compile a Numba kernel for the specified arguments
                         # using cuda.jit
-                        numba_kernel = cuda.jit(fastmath=self.fastmath)(self.python_func) \
+                        jit_kwargs = {'fastmath': self.fastmath}
+                        if self.max_registers is not None:
+                            jit_kwargs['max_registers'] = self.max_registers
+                        numba_kernel = cuda.jit(**jit_kwargs)(self.python_func) \
                             .specialize(*args)
 
                         # Convert the kernel into a cupy kernel and cache it in

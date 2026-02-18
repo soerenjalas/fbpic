@@ -43,6 +43,8 @@ python benchmarks/simple_step_benchmark.py --use-cuda
     (A/B test direct `cupy.fft` path that bypasses explicit FFT copy kernels)
   - `--use-cuda-fastmath` / `--disable-cuda-fastmath`
     (A/B test CUDA kernel compilation with fastmath)
+  - `--cuda-max-registers`
+    (A/B test register-pressure/occupancy tradeoff in CUDA kernels)
   - `--use-unsorted-rho-deposition` / `--disable-unsorted-rho-deposition`
     (force on/off for GPU unsorted rho deposition; default is on)
   - `--use-unsorted-j-deposition` / `--disable-unsorted-j-deposition`

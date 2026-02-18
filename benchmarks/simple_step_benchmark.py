@@ -55,6 +55,8 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_CUDA_FASTMATH"] = "1"
     if args.disable_cuda_fastmath:
         os.environ["FBPIC_CUDA_FASTMATH"] = "0"
+    if args.cuda_max_registers is not None:
+        os.environ["FBPIC_CUDA_MAX_REGISTERS"] = str(args.cuda_max_registers)
     if args.use_unsorted_rho_deposition:
         os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "1"
     if args.disable_unsorted_rho_deposition:
@@ -188,6 +190,7 @@ def run_benchmark(args):
         print(f"fuse_ifft_scale     : {getattr(sim.fld.trans[0].fft, 'fuse_ifft_scale', 'n/a')}")
         print(f"direct_axis0_fft    : {getattr(sim.fld.trans[0].fft, 'use_direct_axis0_fft', 'n/a')}")
         print(f"cuda_fastmath       : {os.environ.get('FBPIC_CUDA_FASTMATH', '0')}")
+        print(f"cuda_max_registers  : {os.environ.get('FBPIC_CUDA_MAX_REGISTERS', 'default')}")
     print(f"steps               : {args.steps}")
     print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
     print(f"particles (total)   : {n_particles}")
@@ -271,6 +274,8 @@ def parse_args():
                    help="compile CUDA kernels with fastmath (experimental)")
     p.add_argument("--disable-cuda-fastmath", action="store_true",
                    help="force-disable CUDA fastmath compilation")
+    p.add_argument("--cuda-max-registers", type=int, default=None,
+                   help="set max_registers for CUDA kernel compilation (experimental)")
     p.add_argument("--use-unsorted-rho-deposition", action="store_true",
                    help="force-enable unsorted atomic rho deposition on GPU")
     p.add_argument("--disable-unsorted-rho-deposition", action="store_true",
