@@ -45,4 +45,6 @@ python benchmarks/simple_step_benchmark.py --use-cuda
     (force on/off for GPU unsorted J deposition; default is on)
 - Current built-in GPU defaults are architecture-aware (including A100),
   and overrides are useful for cluster-specific retuning.
+- For `Nm=3`, the unsorted deposition path includes fused m=0,1,2 kernels
+  (for both rho and J) to reduce per-mode launch overhead.
 - For detailed profiling, see `docs/source/advanced/profiling.rst`.
