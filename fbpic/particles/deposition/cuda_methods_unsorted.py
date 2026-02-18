@@ -9,11 +9,13 @@ from numba import cuda
 from fbpic.utils.cuda import compile_cupy
 import math
 from fbpic.particles.deposition.particle_shapes import Sz_linear, \
-    Sr_linear
+    Sr_linear, Sz_cubic, Sr_cubic
 
 # JIT-compilation of particle shapes
 Sz_linear = cuda.jit(Sz_linear, device=True, inline=False)
 Sr_linear = cuda.jit(Sr_linear, device=True, inline=False)
+Sz_cubic = cuda.jit(Sz_cubic, device=True, inline=False)
+Sr_cubic = cuda.jit(Sr_cubic, device=True, inline=False)
 
 @compile_cupy
 def deposit_rho_gpu_unsorted(x, y, z, w, q,
@@ -140,6 +142,170 @@ def deposit_rho_gpu_unsorted(x, y, z, w, q,
             cuda.atomic.add(rho_m.imag, (iz0, ir1), R_m_10.imag)
             cuda.atomic.add(rho_m.imag, (iz1, ir0), R_m_01.imag)
             cuda.atomic.add(rho_m.imag, (iz1, ir1), R_m_11.imag)
+
+# -------------------------------
+# Field deposition - linear - J
+# -------------------------------
+
+@compile_cupy
+def deposit_rho_gpu_unsorted_cubic(x, y, z, w, q,
+                        invdz, zmin, Nz,
+                        invdr, rmin, Nr,
+                        rho_m, m, beta_n):
+    """
+    Deposition of the charge density rho using numba on the GPU.
+    Iterates over all particles and deposits with cubic shape factors.
+
+    Parameters are identical to `deposit_rho_gpu_unsorted`, except that
+    cubic shape factors are used (16-cell stencil).
+    """
+    # Get the 1D CUDA grid
+    i = cuda.grid(1)
+
+    if i < w.shape[0]:
+
+        # Sign for the shape factors
+        f = (-1)**m
+        # Preliminary arrays for the cylindrical conversion
+        # --------------------------------------------
+        # Position
+        xj = x[i]
+        yj = y[i]
+        zj = z[i]
+        # Weights
+        wj = q * w[i]
+
+        # Cylindrical conversion
+        rj = math.sqrt(xj**2 + yj**2)
+        # Avoid division by 0.
+        if (rj != 0.):
+            invr = 1./rj
+            cos = xj*invr  # Cosine
+            sin = yj*invr  # Sine
+        else:
+            cos = 1.
+            sin = 0.
+        # Calculate azimuthal factor
+        exptheta_m = 1. + 0.j
+        for _ in range(m):
+            exptheta_m *= (cos + 1.j*sin)
+
+        # Positions of the particles, in the cell unit
+        r_cell = invdr*(rj - rmin) - 0.5
+        z_cell = invdz*(zj - zmin) - 0.5
+
+        # Cell indices of the upper cell bounds
+        ir = min( int(math.ceil(r_cell)), Nr )
+        iz = int(math.ceil(z_cell))
+        # Handle periodic boundaries in z
+        if iz < 0:
+            iz += Nz
+        elif iz >= Nz:
+            iz -= Nz
+
+        # Calculate longitudinal indices at which to add charge
+        iz0 = iz - 2
+        iz1 = iz - 1
+        iz2 = iz
+        iz3 = iz + 1
+        if iz0 < 0:
+            iz0 += Nz
+        if iz1 < 0:
+            iz1 += Nz
+        if iz3 > Nz-1:
+            iz3 -= Nz
+
+        # Calculate radial indices at which to add charge
+        ir0 = ir - 2
+        ir1 = min( ir - 1, Nr-1 )
+        ir2 = min( ir    , Nr-1 )
+        ir3 = min( ir + 1, Nr-1 )
+        if ir0 < 0:
+            # Deposition below the axis: fold index into physical region
+            ir0 = -(1 + ir0)
+        if ir1 < 0:
+            # Deposition below the axis: fold index into physical region
+            ir1 = -(1 + ir1)
+
+        # Ruyten-corrected shape factor coefficient
+        bn = beta_n[ir]
+
+        # Precompute shape coefficients
+        Sz0 = Sz_cubic(z_cell, 0)
+        Sz1 = Sz_cubic(z_cell, 1)
+        Sz2 = Sz_cubic(z_cell, 2)
+        Sz3 = Sz_cubic(z_cell, 3)
+
+        Sr0 = Sr_cubic(r_cell, 0, f, bn)
+        Sr1 = Sr_cubic(r_cell, 1, f, bn)
+        Sr2 = Sr_cubic(r_cell, 2, f, bn)
+        Sr3 = Sr_cubic(r_cell, 3, f, bn)
+
+        # Calculate rho
+        R_m_scal = wj * exptheta_m
+
+        R00 = Sr0*Sz0 * R_m_scal
+        R01 = Sr0*Sz1 * R_m_scal
+        R02 = Sr0*Sz2 * R_m_scal
+        R03 = Sr0*Sz3 * R_m_scal
+
+        R10 = Sr1*Sz0 * R_m_scal
+        R11 = Sr1*Sz1 * R_m_scal
+        R12 = Sr1*Sz2 * R_m_scal
+        R13 = Sr1*Sz3 * R_m_scal
+
+        R20 = Sr2*Sz0 * R_m_scal
+        R21 = Sr2*Sz1 * R_m_scal
+        R22 = Sr2*Sz2 * R_m_scal
+        R23 = Sr2*Sz3 * R_m_scal
+
+        R30 = Sr3*Sz0 * R_m_scal
+        R31 = Sr3*Sz1 * R_m_scal
+        R32 = Sr3*Sz2 * R_m_scal
+        R33 = Sr3*Sz3 * R_m_scal
+
+        # Add the calculated fields to the global grid
+        cuda.atomic.add(rho_m.real, (iz0, ir0), R00.real)
+        cuda.atomic.add(rho_m.real, (iz1, ir0), R01.real)
+        cuda.atomic.add(rho_m.real, (iz2, ir0), R02.real)
+        cuda.atomic.add(rho_m.real, (iz3, ir0), R03.real)
+
+        cuda.atomic.add(rho_m.real, (iz0, ir1), R10.real)
+        cuda.atomic.add(rho_m.real, (iz1, ir1), R11.real)
+        cuda.atomic.add(rho_m.real, (iz2, ir1), R12.real)
+        cuda.atomic.add(rho_m.real, (iz3, ir1), R13.real)
+
+        cuda.atomic.add(rho_m.real, (iz0, ir2), R20.real)
+        cuda.atomic.add(rho_m.real, (iz1, ir2), R21.real)
+        cuda.atomic.add(rho_m.real, (iz2, ir2), R22.real)
+        cuda.atomic.add(rho_m.real, (iz3, ir2), R23.real)
+
+        cuda.atomic.add(rho_m.real, (iz0, ir3), R30.real)
+        cuda.atomic.add(rho_m.real, (iz1, ir3), R31.real)
+        cuda.atomic.add(rho_m.real, (iz2, ir3), R32.real)
+        cuda.atomic.add(rho_m.real, (iz3, ir3), R33.real)
+
+        if m > 0:
+            # For azimuthal modes beyond m=0: add imaginary part
+            cuda.atomic.add(rho_m.imag, (iz0, ir0), R00.imag)
+            cuda.atomic.add(rho_m.imag, (iz1, ir0), R01.imag)
+            cuda.atomic.add(rho_m.imag, (iz2, ir0), R02.imag)
+            cuda.atomic.add(rho_m.imag, (iz3, ir0), R03.imag)
+
+            cuda.atomic.add(rho_m.imag, (iz0, ir1), R10.imag)
+            cuda.atomic.add(rho_m.imag, (iz1, ir1), R11.imag)
+            cuda.atomic.add(rho_m.imag, (iz2, ir1), R12.imag)
+            cuda.atomic.add(rho_m.imag, (iz3, ir1), R13.imag)
+
+            cuda.atomic.add(rho_m.imag, (iz0, ir2), R20.imag)
+            cuda.atomic.add(rho_m.imag, (iz1, ir2), R21.imag)
+            cuda.atomic.add(rho_m.imag, (iz2, ir2), R22.imag)
+            cuda.atomic.add(rho_m.imag, (iz3, ir2), R23.imag)
+
+            cuda.atomic.add(rho_m.imag, (iz0, ir3), R30.imag)
+            cuda.atomic.add(rho_m.imag, (iz1, ir3), R31.imag)
+            cuda.atomic.add(rho_m.imag, (iz2, ir3), R32.imag)
+            cuda.atomic.add(rho_m.imag, (iz3, ir3), R33.imag)
 
 # -------------------------------
 # Field deposition - linear - J

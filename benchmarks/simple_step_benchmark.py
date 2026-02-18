@@ -238,7 +238,7 @@ def parse_args():
     p.add_argument("--disable-fused-ifft-scale", action="store_true",
                    help="disable fused iFFT normalization+copy kernel on GPU")
     p.add_argument("--use-unsorted-rho-deposition", action="store_true",
-                   help="use unsorted atomic rho deposition on GPU (experimental, linear shape)")
+                   help="use unsorted atomic rho deposition on GPU (experimental, linear/cubic)")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")
