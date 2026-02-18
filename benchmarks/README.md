@@ -58,3 +58,27 @@ python benchmarks/simple_step_benchmark.py --use-cuda
 - For `Nm=2` and `Nm=3`, the unsorted deposition path includes fused
   multi-mode kernels (for both rho and J) to reduce per-mode launch overhead.
 - For detailed profiling, see `docs/source/advanced/profiling.rst`.
+
+## `boosted_frame_benchmark.py`
+
+A boosted-frame benchmark for production-like timing runs that:
+
+1. Builds a boosted-frame LWFA setup (plasma + optional laser/bunch)
+2. Runs warmup steps first (kernel pre-cooking/JIT)
+3. Times only steady-state steps
+4. Attaches no diagnostics (`sim.diags = []`) to avoid output jitter
+
+### Run (GPU, steady-state)
+
+```bash
+python benchmarks/boosted_frame_benchmark.py \
+  --warmup-steps 5 --steps 40
+```
+
+### Notes
+
+- This script is intended for **steady-state throughput** comparisons between commits.
+- Warmup is excluded from timed runtime.
+- You can still control kernel behavior with environment variables (e.g.
+  `FBPIC_USE_UNSORTED_J_DEPOSITION`, `FBPIC_INLINE_PARTICLE_SHAPES`, etc.)
+  before launching the script.
