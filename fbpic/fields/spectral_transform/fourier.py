@@ -66,6 +66,12 @@ class FFT(object):
 
         # Initialize the object for calculation on the GPU
         if self.use_cuda:
+            # Optional experimental path: perform FFT directly on the 2D array
+            # with cupy.fft along axis 0 (no explicit custom copy kernels).
+            # This can be toggled for A/B testing.
+            self.use_direct_axis0_fft = os.environ.get(
+                'FBPIC_USE_DIRECT_AXIS0_FFT', '0').lower() in ('1', 'true', 'yes')
+
             # Set number of CUDA threads per block for copy 1d/2d kernels
             # (can be overridden via FBPIC_COPY_TPBX/FBPIC_COPY_TPBY)
             copy_tpb = get_cuda_copy_tpb(default_v100=(8,32), default_other=(2,16))
@@ -120,16 +126,21 @@ class FFT(object):
             two buffers that are returned by `get_buffers`
         """
         if self.use_cuda :
-            # Copy 2D arrays to 1D array for optimized 1D batch FFT
-            cuda_copy_2d_to_1d[self.dim_grid, self.dim_block](
-                array_in, self.buffer1d_in)
-            # Perform forward FFT
-            self.fft.fft(self.buffer1d_in,
-                         self.buffer1d_out,
-                         cufft.CUFFT_FORWARD)
-            # Copy 1D arrays back to 2D array
-            cuda_copy_1d_to_2d[self.dim_grid, self.dim_block](
-                self.buffer1d_out, array_out)
+            if self.use_direct_axis0_fft:
+                # Experimental direct path: rely on cupy.fft for axis-0 transform.
+                # Note: cupy.fft returns a new array; copy into pre-allocated output.
+                array_out[:, :] = cupy.fft.fft(array_in, axis=0)
+            else:
+                # Copy 2D arrays to 1D array for optimized 1D batch FFT
+                cuda_copy_2d_to_1d[self.dim_grid, self.dim_block](
+                    array_in, self.buffer1d_in)
+                # Perform forward FFT
+                self.fft.fft(self.buffer1d_in,
+                             self.buffer1d_out,
+                             cufft.CUFFT_FORWARD)
+                # Copy 1D arrays back to 2D array
+                cuda_copy_1d_to_2d[self.dim_grid, self.dim_block](
+                    self.buffer1d_out, array_out)
         elif self.use_mkl:
             # Perform the FFT on the CPU using MKL
             self.mklfft.transform( array_in, array_out )
@@ -152,22 +163,27 @@ class FFT(object):
             two buffers that are returned by `get_buffers`
         """
         if self.use_cuda :
-            # Copy 2D arrays to 1D array for optimized 1D batch FFT
-            cuda_copy_2d_to_1d[self.dim_grid, self.dim_block](
-                array_in, self.buffer1d_in)
-            # Perform inverse FFT
-            self.fft.fft(self.buffer1d_in,
-                         self.buffer1d_out,
-                         cufft.CUFFT_INVERSE)
-            if self.fuse_ifft_scale:
-                # Copy 1D arrays back to 2D array and normalize in one kernel
-                cuda_copy_1d_to_2d_and_scale[self.dim_grid, self.dim_block](
-                    self.buffer1d_out, array_out, self.inv_Nz)
+            if self.use_direct_axis0_fft:
+                # Experimental direct path: cupy.fft.ifft uses numpy normalization
+                # convention and already applies 1/N scaling.
+                array_out[:, :] = cupy.fft.ifft(array_in, axis=0)
             else:
-                # Legacy two-step path (useful for A/B profiling)
-                cupy.multiply(self.buffer1d_out, self.inv_Nz, out=self.buffer1d_out)
-                cuda_copy_1d_to_2d[self.dim_grid, self.dim_block](
-                    self.buffer1d_out, array_out)
+                # Copy 2D arrays to 1D array for optimized 1D batch FFT
+                cuda_copy_2d_to_1d[self.dim_grid, self.dim_block](
+                    array_in, self.buffer1d_in)
+                # Perform inverse FFT
+                self.fft.fft(self.buffer1d_in,
+                             self.buffer1d_out,
+                             cufft.CUFFT_INVERSE)
+                if self.fuse_ifft_scale:
+                    # Copy 1D arrays back to 2D array and normalize in one kernel
+                    cuda_copy_1d_to_2d_and_scale[self.dim_grid, self.dim_block](
+                        self.buffer1d_out, array_out, self.inv_Nz)
+                else:
+                    # Legacy two-step path (useful for A/B profiling)
+                    cupy.multiply(self.buffer1d_out, self.inv_Nz, out=self.buffer1d_out)
+                    cuda_copy_1d_to_2d[self.dim_grid, self.dim_block](
+                        self.buffer1d_out, array_out)
         elif self.use_mkl:
             # Perform the inverse FFT on the CPU using MKL
             self.mklfft.inverse_transform( array_in, array_out )

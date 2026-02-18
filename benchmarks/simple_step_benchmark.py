@@ -28,6 +28,8 @@ def apply_kernel_env_overrides(args):
         raise ValueError("Cannot set both --use-unsorted-rho-deposition and --disable-unsorted-rho-deposition")
     if args.use_unsorted_j_deposition and args.disable_unsorted_j_deposition:
         raise ValueError("Cannot set both --use-unsorted-j-deposition and --disable-unsorted-j-deposition")
+    if args.use_direct_axis0_fft and args.disable_direct_axis0_fft:
+        raise ValueError("Cannot set both --use-direct-axis0-fft and --disable-direct-axis0-fft")
 
     if args.deposit_tpb is not None:
         os.environ["FBPIC_DEPOSIT_TPB"] = str(args.deposit_tpb)
@@ -43,6 +45,10 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_SORT_TPB"] = str(args.sort_tpb)
     if args.disable_fused_ifft_scale:
         os.environ["FBPIC_FFT_FUSE_IFFT_SCALE"] = "0"
+    if args.use_direct_axis0_fft:
+        os.environ["FBPIC_USE_DIRECT_AXIS0_FFT"] = "1"
+    if args.disable_direct_axis0_fft:
+        os.environ["FBPIC_USE_DIRECT_AXIS0_FFT"] = "0"
     if args.use_unsorted_rho_deposition:
         os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "1"
     if args.disable_unsorted_rho_deposition:
@@ -174,6 +180,7 @@ def run_benchmark(args):
         print(f"fft_copy_tpb        : {fft_copy_tpb}")
         print(f"dht_copy_tpb        : {dht_copy_tpb}")
         print(f"fuse_ifft_scale     : {getattr(sim.fld.trans[0].fft, 'fuse_ifft_scale', 'n/a')}")
+        print(f"direct_axis0_fft    : {getattr(sim.fld.trans[0].fft, 'use_direct_axis0_fft', 'n/a')}")
     print(f"steps               : {args.steps}")
     print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
     print(f"particles (total)   : {n_particles}")
@@ -249,6 +256,10 @@ def parse_args():
                    help="override FBPIC_SORT_TPB")
     p.add_argument("--disable-fused-ifft-scale", action="store_true",
                    help="disable fused iFFT normalization+copy kernel on GPU")
+    p.add_argument("--use-direct-axis0-fft", action="store_true",
+                   help="experimental direct cupy.fft path along axis 0")
+    p.add_argument("--disable-direct-axis0-fft", action="store_true",
+                   help="force-disable direct cupy.fft axis-0 path")
     p.add_argument("--use-unsorted-rho-deposition", action="store_true",
                    help="force-enable unsorted atomic rho deposition on GPU")
     p.add_argument("--disable-unsorted-rho-deposition", action="store_true",
