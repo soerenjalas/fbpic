@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Simple performance benchmark for FBPIC PIC steps.
+
+This script creates a small configurable simulation, warms up JIT kernels,
+then times a sequence of PIC steps and reports a coarse per-phase breakdown.
+"""
+
+import argparse
+import time
+from collections import defaultdict
+from pathlib import Path
+import sys
+
+# Allow running this script directly from the source tree without installation.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scipy.constants import c
+
+from fbpic.main import Simulation
+
+
+def build_simulation(args):
+    zmin = 0.0
+    zmax = args.zmax
+    rmax = args.rmax
+    dt = args.dt if args.dt is not None else zmax / args.Nz / c
+
+    sim = Simulation(
+        Nz=args.Nz,
+        zmax=zmax,
+        Nr=args.Nr,
+        rmax=rmax,
+        Nm=args.Nm,
+        dt=dt,
+        p_zmin=zmin,
+        p_zmax=zmax,
+        p_rmin=0.0,
+        p_rmax=args.plasma_rmax if args.plasma_rmax is not None else 0.8 * rmax,
+        p_nz=args.p_nz,
+        p_nr=args.p_nr,
+        p_nt=args.p_nt,
+        n_e=args.n_e,
+        n_order=args.n_order,
+        particle_shape=args.particle_shape,
+        use_cuda=args.use_cuda,
+        boundaries={"z": "periodic", "r": "reflective"},
+        verbose_level=0,
+    )
+    return sim
+
+
+def make_gpu_sync(sim):
+    if not sim.use_cuda:
+        return lambda: None
+    try:
+        import cupy
+
+        return cupy.cuda.Stream.null.synchronize
+    except Exception:
+        # Fallback: no explicit sync if cupy import/sync is unavailable.
+        return lambda: None
+
+
+def wrap_method(obj, method_name, key, timings, calls, sync):
+    original = getattr(obj, method_name)
+
+    def wrapped(*args, **kwargs):
+        sync()
+        t0 = time.perf_counter()
+        out = original(*args, **kwargs)
+        sync()
+        timings[key] += time.perf_counter() - t0
+        calls[key] += 1
+        return out
+
+    setattr(obj, method_name, wrapped)
+
+
+def instrument(sim):
+    timings = defaultdict(float)
+    calls = defaultdict(int)
+    sync = make_gpu_sync(sim)
+
+    wrap_method(sim, "deposit", "deposit", timings, calls, sync)
+    wrap_method(sim, "exchange_and_damp_EB", "exchange_and_damp_EB", timings, calls, sync)
+    wrap_method(sim.fld, "push", "field_push", timings, calls, sync)
+    wrap_method(sim.comm, "exchange_particles", "exchange_particles", timings, calls, sync)
+
+    for species in sim.ptcl:
+        wrap_method(species, "gather", "gather", timings, calls, sync)
+        wrap_method(species, "push_p", "push_p", timings, calls, sync)
+        wrap_method(species, "push_x", "push_x", timings, calls, sync)
+
+    return timings, calls
+
+
+def run_benchmark(args):
+    sim = build_simulation(args)
+
+    n_particles = sum(species.Ntot for species in sim.ptcl)
+    n_cells = sim.fld.Nz * sim.fld.Nr * sim.fld.Nm
+
+    # Warm-up for JIT compilation and data path setup.
+    if args.warmup_steps > 0:
+        sim.step(args.warmup_steps, show_progress=False)
+
+    timings, calls = instrument(sim)
+
+    t0 = time.perf_counter()
+    sim.step(args.steps, show_progress=False)
+    total = time.perf_counter() - t0
+
+    print("=== FBPIC Simple Step Benchmark ===")
+    print(f"backend             : {'GPU' if sim.use_cuda else 'CPU'}")
+    print(f"steps               : {args.steps}")
+    print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
+    print(f"particles (total)   : {n_particles}")
+    print(f"cells (Nz*Nr*Nm)    : {n_cells}")
+    print(f"total runtime [s]   : {total:.6f}")
+    print(f"time / step [s]     : {total / args.steps:.6f}")
+    if n_particles > 0:
+        pps = (n_particles * args.steps) / total
+        print(f"particle-updates/s  : {pps:.3e}")
+
+    print("\n--- Phase breakdown (coarse) ---")
+    ordered_keys = [
+        "exchange_particles",
+        "gather",
+        "push_p",
+        "push_x",
+        "deposit",
+        "field_push",
+        "exchange_and_damp_EB",
+    ]
+    known = 0.0
+    for key in ordered_keys:
+        t = timings.get(key, 0.0)
+        c = calls.get(key, 0)
+        known += t
+        frac = 100.0 * t / total if total > 0 else 0.0
+        print(f"{key:22s} : {t:10.6f} s  ({frac:6.2f} %)  calls={c}")
+
+    other = max(0.0, total - known)
+    frac_other = 100.0 * other / total if total > 0 else 0.0
+    print(f"{'other/uninstrumented':22s} : {other:10.6f} s  ({frac_other:6.2f} %)")
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Simple FBPIC benchmark")
+    p.add_argument("--steps", type=int, default=20, help="timed PIC steps")
+    p.add_argument("--warmup-steps", type=int, default=2, help="warm-up steps before timing")
+
+    p.add_argument("--Nz", type=int, default=256)
+    p.add_argument("--Nr", type=int, default=96)
+    p.add_argument("--Nm", type=int, default=2)
+
+    p.add_argument("--zmax", type=float, default=50e-6)
+    p.add_argument("--rmax", type=float, default=25e-6)
+    p.add_argument("--dt", type=float, default=None, help="default: zmax/Nz/c")
+
+    p.add_argument("--n-e", dest="n_e", type=float, default=1e24)
+    p.add_argument("--p-nz", dest="p_nz", type=int, default=2)
+    p.add_argument("--p-nr", dest="p_nr", type=int, default=2)
+    p.add_argument("--p-nt", dest="p_nt", type=int, default=4)
+    p.add_argument("--plasma-rmax", type=float, default=None)
+
+    p.add_argument("--n-order", type=int, default=16)
+    p.add_argument("--particle-shape", choices=["linear", "cubic"], default="linear")
+    p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
+
+    return p.parse_args()
+
+
+if __name__ == "__main__":
+    run_benchmark(parse_args())
