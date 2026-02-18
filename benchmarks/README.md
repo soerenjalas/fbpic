@@ -41,6 +41,8 @@ python benchmarks/simple_step_benchmark.py --use-cuda
   - `--disable-fused-ifft-scale` (A/B test legacy iFFT normalization path)
   - `--use-direct-axis0-fft` / `--disable-direct-axis0-fft`
     (A/B test direct `cupy.fft` path that bypasses explicit FFT copy kernels)
+  - `--use-cuda-fastmath` / `--disable-cuda-fastmath`
+    (A/B test CUDA kernel compilation with fastmath)
   - `--use-unsorted-rho-deposition` / `--disable-unsorted-rho-deposition`
     (force on/off for GPU unsorted rho deposition; default is on)
   - `--use-unsorted-j-deposition` / `--disable-unsorted-j-deposition`

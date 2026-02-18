@@ -375,6 +375,13 @@ def mpi_select_gpus(mpi):
 
 if cuda_installed:
 
+    def _env_flag(var_name, default=False):
+        """Read boolean environment flag."""
+        value = os.environ.get(var_name)
+        if value is None:
+            return default
+        return value.lower() in ('1', 'true', 'yes', 'on')
+
     def get_args_hash(args):
         """
         Computes a hash from the argument types of a kernel call.
@@ -440,6 +447,10 @@ if cuda_installed:
             self.python_func = func
             self.kernel_dict = {} # Stores compiled kernels to avoid re-compilation
 
+            # Optional compile option for all CUDA kernels created through
+            # this decorator. Disabled by default to preserve strict behavior.
+            self.fastmath = _env_flag('FBPIC_CUDA_FASTMATH', default=False)
+
             # Flag to save whether the kernel has been explicitly specialized
             self.is_specialized = False
 
@@ -493,7 +504,7 @@ if cuda_installed:
 
             # Compile a Numba kernel for the given signature
             # using cuda.jit
-            numba_kernel = cuda.jit(signature)(self.python_func)
+            numba_kernel = cuda.jit(signature, fastmath=self.fastmath)(self.python_func)
 
             # Convert the kernel into a cupy kernel
             self.specialized_kernel = self.make_cupy_kernel( numba_kernel )
@@ -560,7 +571,7 @@ if cuda_installed:
 
                         # Compile a Numba kernel for the specified arguments
                         # using cuda.jit
-                        numba_kernel = cuda.jit()(self.python_func) \
+                        numba_kernel = cuda.jit(fastmath=self.fastmath)(self.python_func) \
                             .specialize(*args)
 
                         # Convert the kernel into a cupy kernel and cache it in
