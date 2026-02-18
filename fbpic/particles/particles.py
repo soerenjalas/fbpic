@@ -39,7 +39,8 @@ if cuda_installed:
     from .push.cuda_methods import push_p_gpu, push_p_ioniz_gpu, \
                                 push_p_after_plane_gpu, push_x_gpu
     from .deposition.cuda_methods import deposit_rho_gpu_linear, \
-        deposit_J_gpu_linear, deposit_rho_gpu_cubic, deposit_J_gpu_cubic
+        deposit_J_gpu_linear, deposit_rho_gpu_cubic, deposit_J_gpu_cubic, \
+        deposit_J_gpu_cubic_m3_supercell
     from .deposition.cuda_methods_unsorted import deposit_rho_gpu_unsorted, \
         deposit_rho_gpu_unsorted_cubic, deposit_rho_gpu_unsorted_linear_m2, \
         deposit_rho_gpu_unsorted_cubic_m2, deposit_rho_gpu_unsorted_linear_m3, \
@@ -339,6 +340,15 @@ class Particles(object) :
             else:
                 self.use_unsorted_J_deposition = \
                     unsorted_J_env.lower() in ('1', 'true', 'yes')
+
+            # Experimental: fused cubic Nm=3 J deposition over sorted cells.
+            # This path accumulates per-cell contributions before atomics.
+            supercell_J_env = os.environ.get('FBPIC_USE_SUPERCELL_J_DEPOSITION')
+            if supercell_J_env is None:
+                self.use_supercell_J_deposition = False
+            else:
+                self.use_supercell_J_deposition = \
+                    supercell_J_env.lower() in ('1', 'true', 'yes')
 
     def send_particles_to_gpu( self ):
         """
@@ -1094,6 +1104,7 @@ class Particles(object) :
 
         # Shortcuts and safe-guards
         grid = fld.interp
+        Nm = len(grid)
         assert fieldtype in ['rho', 'J']
         assert self.particle_shape in ['linear', 'cubic']
 
@@ -1101,13 +1112,22 @@ class Particles(object) :
         # deposition kernel.
         if self.use_cuda:
             requires_sorted = True
+
+            use_supercell_J = (
+                (fieldtype == 'J') and
+                (self.particle_shape == 'cubic') and
+                (Nm == 3) and
+                getattr(self, 'use_supercell_J_deposition', False)
+            )
+
             if (fieldtype == 'rho') and \
                     (self.particle_shape in ('linear', 'cubic')) and \
                     self.use_unsorted_rho_deposition:
                 requires_sorted = False
             if (fieldtype == 'J') and \
                     (self.particle_shape in ('linear', 'cubic')) and \
-                    self.use_unsorted_J_deposition:
+                    self.use_unsorted_J_deposition and \
+                    (not use_supercell_J):
                 requires_sorted = False
 
             if requires_sorted and (not self.sorted):
@@ -1126,7 +1146,6 @@ class Particles(object) :
         # GPU (CUDA) version
         if self.use_cuda:
             # Call the CUDA Kernel for the deposition of rho or J
-            Nm = len( grid )
             # Rho
             if fieldtype == 'rho':
                 if self.use_unsorted_rho_deposition and \
@@ -1234,7 +1253,29 @@ class Particles(object) :
                                     grid[m].d_ruyten_cubic_coef)
             # J
             elif fieldtype == 'J':
-                if self.use_unsorted_J_deposition and \
+                use_supercell_J = (
+                    getattr(self, 'use_supercell_J_deposition', False) and
+                    (self.particle_shape == 'cubic') and (Nm == 3)
+                )
+
+                if use_supercell_J:
+                    dim_grid_2d_flat, dim_block_2d_flat = \
+                        cuda_tpb_bpg_1d(self.prefix_sum.shape[0], TPB=self.deposit_tpb)
+                    deposit_J_gpu_cubic_m3_supercell[
+                        dim_grid_2d_flat, dim_block_2d_flat](
+                        self.x, self.y, self.z, weight, self.q,
+                        self.ux, self.uy, self.uz, self.inv_gamma,
+                        grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                        grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                        grid[0].Jr, grid[0].Jt, grid[0].Jz,
+                        grid[1].Jr, grid[1].Jt, grid[1].Jz,
+                        grid[2].Jr, grid[2].Jt, grid[2].Jz,
+                        self.cell_idx, self.prefix_sum,
+                        grid[0].d_ruyten_cubic_coef,
+                        grid[1].d_ruyten_cubic_coef,
+                        grid[2].d_ruyten_cubic_coef)
+
+                elif self.use_unsorted_J_deposition and \
                         (self.particle_shape in ('linear', 'cubic')):
                     dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
                         self.Ntot, TPB=self.deposit_tpb)

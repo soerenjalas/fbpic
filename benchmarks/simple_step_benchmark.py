@@ -32,6 +32,8 @@ def apply_kernel_env_overrides(args):
         raise ValueError("Cannot set both --use-direct-axis0-fft and --disable-direct-axis0-fft")
     if args.use_cuda_fastmath and args.disable_cuda_fastmath:
         raise ValueError("Cannot set both --use-cuda-fastmath and --disable-cuda-fastmath")
+    if args.use_supercell_j_deposition and args.disable_supercell_j_deposition:
+        raise ValueError("Cannot set both --use-supercell-j-deposition and --disable-supercell-j-deposition")
 
     if args.deposit_tpb is not None:
         os.environ["FBPIC_DEPOSIT_TPB"] = str(args.deposit_tpb)
@@ -65,6 +67,10 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_USE_UNSORTED_J_DEPOSITION"] = "1"
     if args.disable_unsorted_j_deposition:
         os.environ["FBPIC_USE_UNSORTED_J_DEPOSITION"] = "0"
+    if args.use_supercell_j_deposition:
+        os.environ["FBPIC_USE_SUPERCELL_J_DEPOSITION"] = "1"
+    if args.disable_supercell_j_deposition:
+        os.environ["FBPIC_USE_SUPERCELL_J_DEPOSITION"] = "0"
 
 
 def build_simulation(args):
@@ -176,11 +182,13 @@ def run_benchmark(args):
             print(f"sort_tpb            : {getattr(p0, 'sort_tpb', 'n/a')}")
             print(f"unsorted_rho        : {getattr(p0, 'use_unsorted_rho_deposition', 'n/a')}")
             print(f"unsorted_J          : {getattr(p0, 'use_unsorted_J_deposition', 'n/a')}")
+            print(f"supercell_J         : {getattr(p0, 'use_supercell_J_deposition', 'n/a')}")
         else:
             print("deposit_tpb         : n/a")
             print("gather_tpb          : n/a")
             print("push_tpb            : n/a")
             print("sort_tpb            : n/a")
+            print("supercell_J         : n/a")
 
         # The copy kernels are configured in both FFT and DHT transforms
         fft_copy_tpb = getattr(sim.fld.trans[0].fft, 'dim_block', 'n/a')
@@ -284,6 +292,10 @@ def parse_args():
                    help="force-enable unsorted atomic J deposition on GPU (experimental)")
     p.add_argument("--disable-unsorted-j-deposition", action="store_true",
                    help="force-disable unsorted atomic J deposition on GPU")
+    p.add_argument("--use-supercell-j-deposition", action="store_true",
+                   help="enable experimental sorted supercell-style J deposition for cubic Nm=3")
+    p.add_argument("--disable-supercell-j-deposition", action="store_true",
+                   help="disable experimental sorted supercell-style J deposition")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")

@@ -49,6 +49,8 @@ python benchmarks/simple_step_benchmark.py --use-cuda
     (force on/off for GPU unsorted rho deposition; default is on)
   - `--use-unsorted-j-deposition` / `--disable-unsorted-j-deposition`
     (force on/off for GPU unsorted J deposition; default is on)
+  - `--use-supercell-j-deposition` / `--disable-supercell-j-deposition`
+    (A/B test experimental sorted supercell-style fused J deposition for cubic `Nm=3`)
 - Current built-in GPU defaults are architecture-aware (including A100),
   and overrides are useful for cluster-specific retuning.
 - For `Nm=2` and `Nm=3`, the unsorted deposition path includes fused
