@@ -8,15 +8,21 @@ This file is part of the Fourier-Bessel Particle-In-Cell code (FB-PIC)
 from numba import cuda
 from fbpic.utils.cuda import compile_cupy
 import math
+import os
 from scipy.constants import c
 from fbpic.particles.deposition.particle_shapes import Sz_linear, \
     Sr_linear, Sz_cubic, Sr_cubic
 
+# Optional inlining of particle-shape device functions.
+# This is experimental and can change register pressure/occupancy.
+INLINE_PARTICLE_SHAPES = os.environ.get(
+    'FBPIC_INLINE_PARTICLE_SHAPES', '0').lower() in ('1', 'true', 'yes')
+
 # JIT-compilation of particle shapes
-Sz_linear = cuda.jit(Sz_linear, device=True, inline=False)
-Sr_linear = cuda.jit(Sr_linear, device=True, inline=False)
-Sz_cubic = cuda.jit(Sz_cubic, device=True, inline=False)
-Sr_cubic = cuda.jit(Sr_cubic, device=True, inline=False)
+Sz_linear = cuda.jit(Sz_linear, device=True, inline=INLINE_PARTICLE_SHAPES)
+Sr_linear = cuda.jit(Sr_linear, device=True, inline=INLINE_PARTICLE_SHAPES)
+Sz_cubic = cuda.jit(Sz_cubic, device=True, inline=INLINE_PARTICLE_SHAPES)
+Sr_cubic = cuda.jit(Sr_cubic, device=True, inline=INLINE_PARTICLE_SHAPES)
 
 @compile_cupy
 def deposit_rho_gpu_unsorted(x, y, z, w, q,

@@ -19,8 +19,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from scipy.constants import c
 
-from fbpic.main import Simulation
-
 
 def apply_kernel_env_overrides(args):
     """Apply optional CUDA kernel launch overrides via environment vars."""
@@ -36,6 +34,8 @@ def apply_kernel_env_overrides(args):
         raise ValueError("Cannot set both --use-supercell-j-deposition and --disable-supercell-j-deposition")
     if args.use_supercell_j_deposition and args.use_unsorted_j_deposition:
         raise ValueError("--use-supercell-j-deposition and --use-unsorted-j-deposition are mutually exclusive")
+    if args.use_inline_particle_shapes and args.disable_inline_particle_shapes:
+        raise ValueError("Cannot set both --use-inline-particle-shapes and --disable-inline-particle-shapes")
 
     if args.deposit_tpb is not None:
         os.environ["FBPIC_DEPOSIT_TPB"] = str(args.deposit_tpb)
@@ -73,9 +73,17 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_USE_SUPERCELL_J_DEPOSITION"] = "1"
     if args.disable_supercell_j_deposition:
         os.environ["FBPIC_USE_SUPERCELL_J_DEPOSITION"] = "0"
+    if args.use_inline_particle_shapes:
+        os.environ["FBPIC_INLINE_PARTICLE_SHAPES"] = "1"
+    if args.disable_inline_particle_shapes:
+        os.environ["FBPIC_INLINE_PARTICLE_SHAPES"] = "0"
 
 
 def build_simulation(args):
+    # Import after env overrides are applied, so import-time CUDA options
+    # (e.g. particle-shape inlining) can be controlled by benchmark flags.
+    from fbpic.main import Simulation
+
     zmin = 0.0
     zmax = args.zmax
     rmax = args.rmax
@@ -201,6 +209,7 @@ def run_benchmark(args):
         print(f"direct_axis0_fft    : {getattr(sim.fld.trans[0].fft, 'use_direct_axis0_fft', 'n/a')}")
         print(f"cuda_fastmath       : {os.environ.get('FBPIC_CUDA_FASTMATH', '0')}")
         print(f"cuda_max_registers  : {os.environ.get('FBPIC_CUDA_MAX_REGISTERS', 'default')}")
+        print(f"inline_shapes       : {os.environ.get('FBPIC_INLINE_PARTICLE_SHAPES', '0')}")
     print(f"steps               : {args.steps}")
     print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
     print(f"particles (total)   : {n_particles}")
@@ -298,6 +307,10 @@ def parse_args():
                    help="enable experimental sorted supercell-style J deposition for cubic Nm=3")
     p.add_argument("--disable-supercell-j-deposition", action="store_true",
                    help="disable experimental sorted supercell-style J deposition")
+    p.add_argument("--use-inline-particle-shapes", action="store_true",
+                   help="compile unsorted deposition kernels with inlined shape functions (experimental)")
+    p.add_argument("--disable-inline-particle-shapes", action="store_true",
+                   help="force-disable inlined particle shape functions in unsorted deposition kernels")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")
