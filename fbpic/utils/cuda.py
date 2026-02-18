@@ -5,6 +5,7 @@
 This file is part of the Fourier-Bessel Particle-In-Cell code (FB-PIC)
 It defines a set of generic functions that operate on a GPU.
 """
+import os
 import warnings
 import numba
 numba_version = (int(numba.__version__.split('.')[0]),
@@ -26,7 +27,7 @@ if numba_cuda_installed:
     elif "V100" in str(cuda.gpus[0]._device.name):
         cuda_gpu_model = "V100"
     elif "A100" in str(cuda.gpus[0]._device.name):
-        cuda_gpu_model = "V100" # force to V100
+        cuda_gpu_model = "A100"
     else:
         cuda_gpu_model = "other"
 
@@ -71,8 +72,8 @@ def cuda_tpb_bpg_1d(x, TPB = 256):
     TPB : int
         Threads per block.
     """
-    # Calculates the needed blocks per grid
-    BPG = int(x/TPB + 1)
+    # Calculates the needed blocks per grid (ceil division)
+    BPG = (x + TPB - 1) // TPB
     return BPG, TPB
 
 def cuda_tpb_bpg_2d(x, y, TPBx = 1, TPBy = 128):
@@ -95,10 +96,53 @@ def cuda_tpb_bpg_2d(x, y, TPBx = 1, TPBy = 128):
     (TPBx, TPBy) : tuple of ints
         Threads per block in x and y.
     """
-    # Calculates the needed blocks per grid
-    BPGx = int(x/TPBx + 1)
-    BPGy = int(y/TPBy + 1)
+    # Calculates the needed blocks per grid (ceil division)
+    BPGx = (x + TPBx - 1) // TPBx
+    BPGy = (y + TPBy - 1) // TPBy
     return (BPGx, BPGy), (TPBx, TPBy)
+
+
+def _read_positive_int_env(var_name):
+    """Read a positive integer from environment, or return None."""
+    value = os.environ.get(var_name)
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        warnings.warn(
+            f"Ignoring invalid value for {var_name}: {value!r} (expected integer)."
+        )
+        return None
+    if parsed <= 0:
+        warnings.warn(
+            f"Ignoring invalid value for {var_name}: {value!r} (expected > 0)."
+        )
+        return None
+    return parsed
+
+
+def get_cuda_copy_tpb(default_v100=(8, 32), default_a100=(8, 16),
+                      default_other=(2, 16)):
+    """
+    Return CUDA threads-per-block tuple for copy kernels.
+
+    This can be overridden via environment variables:
+    - FBPIC_COPY_TPBX
+    - FBPIC_COPY_TPBY
+    """
+    tpbx = _read_positive_int_env('FBPIC_COPY_TPBX')
+    tpby = _read_positive_int_env('FBPIC_COPY_TPBY')
+    if (tpbx is not None) and (tpby is not None):
+        return (tpbx, tpby)
+
+    if cuda_gpu_model == "A100":
+        return default_a100
+    elif cuda_gpu_model == "V100":
+        return default_v100
+    else:
+        return default_other
+
 
 # -----------------------------------------------------
 # CUDA memory management
@@ -331,6 +375,13 @@ def mpi_select_gpus(mpi):
 
 if cuda_installed:
 
+    def _env_flag(var_name, default=False):
+        """Read boolean environment flag."""
+        value = os.environ.get(var_name)
+        if value is None:
+            return default
+        return value.lower() in ('1', 'true', 'yes', 'on')
+
     def get_args_hash(args):
         """
         Computes a hash from the argument types of a kernel call.
@@ -396,6 +447,11 @@ if cuda_installed:
             self.python_func = func
             self.kernel_dict = {} # Stores compiled kernels to avoid re-compilation
 
+            # Optional compile option for all CUDA kernels created through
+            # this decorator. Disabled by default to preserve strict behavior.
+            self.fastmath = _env_flag('FBPIC_CUDA_FASTMATH', default=False)
+            self.max_registers = _read_positive_int_env('FBPIC_CUDA_MAX_REGISTERS')
+
             # Flag to save whether the kernel has been explicitly specialized
             self.is_specialized = False
 
@@ -449,7 +505,10 @@ if cuda_installed:
 
             # Compile a Numba kernel for the given signature
             # using cuda.jit
-            numba_kernel = cuda.jit(signature)(self.python_func)
+            jit_kwargs = {'fastmath': self.fastmath}
+            if self.max_registers is not None:
+                jit_kwargs['max_registers'] = self.max_registers
+            numba_kernel = cuda.jit(signature, **jit_kwargs)(self.python_func)
 
             # Convert the kernel into a cupy kernel
             self.specialized_kernel = self.make_cupy_kernel( numba_kernel )
@@ -516,7 +575,10 @@ if cuda_installed:
 
                         # Compile a Numba kernel for the specified arguments
                         # using cuda.jit
-                        numba_kernel = cuda.jit()(self.python_func) \
+                        jit_kwargs = {'fastmath': self.fastmath}
+                        if self.max_registers is not None:
+                            jit_kwargs['max_registers'] = self.max_registers
+                        numba_kernel = cuda.jit(**jit_kwargs)(self.python_func) \
                             .specialize(*args)
 
                         # Convert the kernel into a cupy kernel and cache it in

@@ -5,6 +5,7 @@
 This file is part of the Fourier-Bessel Particle-In-Cell code (FB-PIC)
 It defines the structure and methods associated with the particles.
 """
+import os
 import warnings
 import numpy as np
 from scipy.constants import e
@@ -39,6 +40,13 @@ if cuda_installed:
                                 push_p_after_plane_gpu, push_x_gpu
     from .deposition.cuda_methods import deposit_rho_gpu_linear, \
         deposit_J_gpu_linear, deposit_rho_gpu_cubic, deposit_J_gpu_cubic
+    from .deposition.cuda_methods_unsorted import deposit_rho_gpu_unsorted, \
+        deposit_rho_gpu_unsorted_cubic, deposit_rho_gpu_unsorted_linear_m2, \
+        deposit_rho_gpu_unsorted_cubic_m2, deposit_rho_gpu_unsorted_linear_m3, \
+        deposit_rho_gpu_unsorted_cubic_m3, deposit_J_gpu_unsorted_rel_linear, \
+        deposit_J_gpu_unsorted_rel_cubic, deposit_J_gpu_unsorted_rel_linear_m2, \
+        deposit_J_gpu_unsorted_rel_cubic_m2, deposit_J_gpu_unsorted_rel_linear_m3, \
+        deposit_J_gpu_unsorted_rel_cubic_m3
     from .deposition.cuda_methods_one_mode import \
         deposit_rho_gpu_linear_one_mode, deposit_J_gpu_linear_one_mode, \
         deposit_rho_gpu_cubic_one_mode, deposit_J_gpu_cubic_one_mode
@@ -246,14 +254,92 @@ class Particles(object) :
             self.prefix_sum_shift = 0
             # Register boolean that records if the particles are sorted or not
             self.sorted = False
-            # Define optimal number of CUDA threads per block for deposition
-            # and gathering kernels (determined empirically)
+            # Define number of CUDA threads per block for deposition,
+            # gathering, push and sorting kernels
+            # (can be overridden via environment)
             if particle_shape == "cubic":
                 self.deposit_tpb = 32
                 self.gather_tpb = 256
             else:
-                self.deposit_tpb = 16 if cuda_gpu_model == "V100" else 8
-                self.gather_tpb = 128
+                if cuda_gpu_model == "A100":
+                    self.deposit_tpb = 16
+                    self.gather_tpb = 256
+                elif cuda_gpu_model == "V100":
+                    self.deposit_tpb = 16
+                    self.gather_tpb = 128
+                else:
+                    self.deposit_tpb = 8
+                    self.gather_tpb = 128
+            if cuda_gpu_model == "A100":
+                self.push_tpb = 512
+                self.sort_tpb = 512
+            else:
+                self.push_tpb = 256
+                self.sort_tpb = 256
+
+            deposit_tpb_env = os.environ.get('FBPIC_DEPOSIT_TPB')
+            gather_tpb_env = os.environ.get('FBPIC_GATHER_TPB')
+            push_tpb_env = os.environ.get('FBPIC_PUSH_TPB')
+            sort_tpb_env = os.environ.get('FBPIC_SORT_TPB')
+            if deposit_tpb_env is not None:
+                try:
+                    deposit_tpb = int(deposit_tpb_env)
+                    if deposit_tpb > 0:
+                        self.deposit_tpb = deposit_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_DEPOSIT_TPB={deposit_tpb_env!r}"
+                    )
+            if gather_tpb_env is not None:
+                try:
+                    gather_tpb = int(gather_tpb_env)
+                    if gather_tpb > 0:
+                        self.gather_tpb = gather_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_GATHER_TPB={gather_tpb_env!r}"
+                    )
+            if push_tpb_env is not None:
+                try:
+                    push_tpb = int(push_tpb_env)
+                    if push_tpb > 0:
+                        self.push_tpb = push_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_PUSH_TPB={push_tpb_env!r}"
+                    )
+            if sort_tpb_env is not None:
+                try:
+                    sort_tpb = int(sort_tpb_env)
+                    if sort_tpb > 0:
+                        self.sort_tpb = sort_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_SORT_TPB={sort_tpb_env!r}"
+                    )
+
+            # Use atomic unsorted rho deposition on GPU to avoid an
+            # additional full particle sort before rho deposition.
+            # (implemented for linear and cubic particle shapes)
+            unsorted_rho_env = os.environ.get('FBPIC_USE_UNSORTED_RHO_DEPOSITION')
+            if unsorted_rho_env is None:
+                # Default on for GPU (can be disabled via env var)
+                self.use_unsorted_rho_deposition = True
+            else:
+                self.use_unsorted_rho_deposition = \
+                    unsorted_rho_env.lower() in ('1', 'true', 'yes')
+
+            # Use atomic unsorted J deposition on GPU to avoid an
+            # additional full particle sort before J deposition.
+            # (implemented for linear and cubic particle shapes)
+            unsorted_J_env = os.environ.get('FBPIC_USE_UNSORTED_J_DEPOSITION')
+            if unsorted_J_env is None:
+                # Default on for GPU (can be disabled via env var)
+                self.use_unsorted_J_deposition = True
+            else:
+                self.use_unsorted_J_deposition = \
+                    unsorted_J_env.lower() in ('1', 'true', 'yes')
+
 
     def send_particles_to_gpu( self ):
         """
@@ -557,7 +643,7 @@ class Particles(object) :
 
     def activate_spin_tracking(self, sx_m=0., sy_m=0., sz_m=1.,
                                anom=0.00115965218128, spin_distr='fixed'):
-        """
+        r"""
         Activate spin tracking for this particle. This will
         enable calculating the evolution of particle spin
         vector throughout the simulation.
@@ -655,7 +741,8 @@ class Particles(object) :
         the rearranged data.
         """
         # Get the threads per block and the blocks per grid
-        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+            self.Ntot, TPB=self.sort_tpb )
         # Iterate over (float) particle attributes
         attr_list = [ (self,'x'), (self,'y'), (self,'z'), \
                         (self,'ux'), (self,'uy'), (self,'uz'), \
@@ -732,7 +819,8 @@ class Particles(object) :
         # GPU (CUDA) version
         if self.use_cuda:
             # Get the threads per block and the blocks per grid
-            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+                self.Ntot, TPB=self.push_tpb )
             # Call the CUDA Kernel for the particle push
             if self.ionizer is not None:
                 # Ionizable species can have a charge that depends on the
@@ -802,7 +890,8 @@ class Particles(object) :
         # GPU (CUDA) version
         if self.use_cuda:
             # Get the threads per block and the blocks per grid
-            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+                self.Ntot, TPB=self.push_tpb )
             # Call the CUDA Kernel for push in x
             push_x_gpu[dim_grid_1d, dim_block_1d](
                 self.x, self.y, self.z,
@@ -1006,13 +1095,25 @@ class Particles(object) :
 
         # Shortcuts and safe-guards
         grid = fld.interp
+        Nm = len(grid)
         assert fieldtype in ['rho', 'J']
         assert self.particle_shape in ['linear', 'cubic']
 
-        # When running on GPU: first sort the arrays of particles
+        # When running on GPU: sort arrays if required by the selected
+        # deposition kernel.
         if self.use_cuda:
-            # Sort the particles
-            if not self.sorted:
+            requires_sorted = True
+
+            if (fieldtype == 'rho') and \
+                    (self.particle_shape in ('linear', 'cubic')) and \
+                    self.use_unsorted_rho_deposition:
+                requires_sorted = False
+            if (fieldtype == 'J') and \
+                    (self.particle_shape in ('linear', 'cubic')) and \
+                    self.use_unsorted_J_deposition:
+                requires_sorted = False
+
+            if requires_sorted and (not self.sorted):
                 self.sort_particles(fld=fld)
                 # The particles are now sorted and rearranged
                 self.sorted = True
@@ -1027,109 +1128,242 @@ class Particles(object) :
 
         # GPU (CUDA) version
         if self.use_cuda:
-            # Get the threads per block and the blocks per grid
-            dim_grid_2d_flat, dim_block_2d_flat = \
-                cuda_tpb_bpg_1d(self.prefix_sum.shape[0], TPB=self.deposit_tpb)
-
             # Call the CUDA Kernel for the deposition of rho or J
-            Nm = len( grid )
             # Rho
             if fieldtype == 'rho':
-                if self.particle_shape == 'linear':
+                if self.use_unsorted_rho_deposition and \
+                        (self.particle_shape in ('linear', 'cubic')):
+                    dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+                        self.Ntot, TPB=self.deposit_tpb)
                     if Nm == 2:
-                        deposit_rho_gpu_linear[
-                            dim_grid_2d_flat, dim_block_2d_flat](
-                            self.x, self.y, self.z, weight, self.q,
-                            grid[0].invdz, grid[0].zmin, grid[0].Nz,
-                            grid[0].invdr, grid[0].rmin, grid[0].Nr,
-                            grid[0].rho, grid[1].rho,
-                            self.cell_idx, self.prefix_sum,
-                            grid[0].d_ruyten_linear_coef,
-                            grid[1].d_ruyten_linear_coef)
+                        if self.particle_shape == 'linear':
+                            deposit_rho_gpu_unsorted_linear_m2[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].rho, grid[1].rho,
+                                grid[0].d_ruyten_linear_coef,
+                                grid[1].d_ruyten_linear_coef)
+                        else:
+                            deposit_rho_gpu_unsorted_cubic_m2[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].rho, grid[1].rho,
+                                grid[0].d_ruyten_cubic_coef,
+                                grid[1].d_ruyten_cubic_coef)
+                    elif Nm == 3:
+                        if self.particle_shape == 'linear':
+                            deposit_rho_gpu_unsorted_linear_m3[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].rho, grid[1].rho, grid[2].rho,
+                                grid[0].d_ruyten_linear_coef,
+                                grid[1].d_ruyten_linear_coef,
+                                grid[2].d_ruyten_linear_coef)
+                        else:
+                            deposit_rho_gpu_unsorted_cubic_m3[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].rho, grid[1].rho, grid[2].rho,
+                                grid[0].d_ruyten_cubic_coef,
+                                grid[1].d_ruyten_cubic_coef,
+                                grid[2].d_ruyten_cubic_coef)
                     else:
                         for m in range(Nm):
-                            deposit_rho_gpu_linear_one_mode[
+                            if self.particle_shape == 'linear':
+                                deposit_rho_gpu_unsorted[dim_grid_1d, dim_block_1d](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].rho, m, grid[m].d_ruyten_linear_coef)
+                            else:
+                                deposit_rho_gpu_unsorted_cubic[dim_grid_1d, dim_block_1d](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].rho, m, grid[m].d_ruyten_cubic_coef)
+                else:
+                    dim_grid_2d_flat, dim_block_2d_flat = \
+                        cuda_tpb_bpg_1d(self.prefix_sum.shape[0], TPB=self.deposit_tpb)
+                    if self.particle_shape == 'linear':
+                        if Nm == 2:
+                            deposit_rho_gpu_linear[
                                 dim_grid_2d_flat, dim_block_2d_flat](
                                 self.x, self.y, self.z, weight, self.q,
-                                grid[m].invdz, grid[m].zmin, grid[m].Nz,
-                                grid[m].invdr, grid[m].rmin, grid[m].Nr,
-                                grid[m].rho, m,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].rho, grid[1].rho,
                                 self.cell_idx, self.prefix_sum,
-                                grid[m].d_ruyten_linear_coef)
-                elif self.particle_shape == 'cubic':
-                    if Nm == 2:
-                        deposit_rho_gpu_cubic[
-                            dim_grid_2d_flat, dim_block_2d_flat](
-                            self.x, self.y, self.z, weight, self.q,
-                            grid[0].invdz, grid[0].zmin, grid[0].Nz,
-                            grid[0].invdr, grid[0].rmin, grid[0].Nr,
-                            grid[0].rho, grid[1].rho,
-                            self.cell_idx, self.prefix_sum,
-                            grid[0].d_ruyten_cubic_coef,
-                            grid[1].d_ruyten_cubic_coef)
-                    else:
-                        for m in range(Nm):
-                            deposit_rho_gpu_cubic_one_mode[
+                                grid[0].d_ruyten_linear_coef,
+                                grid[1].d_ruyten_linear_coef)
+                        else:
+                            for m in range(Nm):
+                                deposit_rho_gpu_linear_one_mode[
+                                    dim_grid_2d_flat, dim_block_2d_flat](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].rho, m,
+                                    self.cell_idx, self.prefix_sum,
+                                    grid[m].d_ruyten_linear_coef)
+                    elif self.particle_shape == 'cubic':
+                        if Nm == 2:
+                            deposit_rho_gpu_cubic[
                                 dim_grid_2d_flat, dim_block_2d_flat](
                                 self.x, self.y, self.z, weight, self.q,
-                                grid[m].invdz, grid[m].zmin, grid[m].Nz,
-                                grid[m].invdr, grid[m].rmin, grid[m].Nr,
-                                grid[m].rho, m,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].rho, grid[1].rho,
                                 self.cell_idx, self.prefix_sum,
-                                grid[m].d_ruyten_cubic_coef)
+                                grid[0].d_ruyten_cubic_coef,
+                                grid[1].d_ruyten_cubic_coef)
+                        else:
+                            for m in range(Nm):
+                                deposit_rho_gpu_cubic_one_mode[
+                                    dim_grid_2d_flat, dim_block_2d_flat](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].rho, m,
+                                    self.cell_idx, self.prefix_sum,
+                                    grid[m].d_ruyten_cubic_coef)
             # J
             elif fieldtype == 'J':
-                # Deposit J in each of four directions
-                if self.particle_shape == 'linear':
+                if self.use_unsorted_J_deposition and \
+                        (self.particle_shape in ('linear', 'cubic')):
+                    dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+                        self.Ntot, TPB=self.deposit_tpb)
                     if Nm == 2:
-                        deposit_J_gpu_linear[
-                            dim_grid_2d_flat, dim_block_2d_flat](
-                            self.x, self.y, self.z, weight, self.q,
-                            self.ux, self.uy, self.uz, self.inv_gamma,
-                            grid[0].invdz, grid[0].zmin, grid[0].Nz,
-                            grid[0].invdr, grid[0].rmin, grid[0].Nr,
-                            grid[0].Jr, grid[1].Jr,
-                            grid[0].Jt, grid[1].Jt,
-                            grid[0].Jz, grid[1].Jz,
-                            self.cell_idx, self.prefix_sum,
-                            grid[0].d_ruyten_linear_coef,
-                            grid[1].d_ruyten_linear_coef)
+                        if self.particle_shape == 'linear':
+                            deposit_J_gpu_unsorted_rel_linear_m2[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                self.ux, self.uy, self.uz, self.inv_gamma,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].Jr, grid[0].Jt, grid[0].Jz,
+                                grid[1].Jr, grid[1].Jt, grid[1].Jz,
+                                grid[0].d_ruyten_linear_coef,
+                                grid[1].d_ruyten_linear_coef)
+                        else:
+                            deposit_J_gpu_unsorted_rel_cubic_m2[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                self.ux, self.uy, self.uz, self.inv_gamma,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].Jr, grid[0].Jt, grid[0].Jz,
+                                grid[1].Jr, grid[1].Jt, grid[1].Jz,
+                                grid[0].d_ruyten_cubic_coef,
+                                grid[1].d_ruyten_cubic_coef)
+                    elif Nm == 3:
+                        if self.particle_shape == 'linear':
+                            deposit_J_gpu_unsorted_rel_linear_m3[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                self.ux, self.uy, self.uz, self.inv_gamma,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].Jr, grid[0].Jt, grid[0].Jz,
+                                grid[1].Jr, grid[1].Jt, grid[1].Jz,
+                                grid[2].Jr, grid[2].Jt, grid[2].Jz,
+                                grid[0].d_ruyten_linear_coef,
+                                grid[1].d_ruyten_linear_coef,
+                                grid[2].d_ruyten_linear_coef)
+                        else:
+                            deposit_J_gpu_unsorted_rel_cubic_m3[
+                                dim_grid_1d, dim_block_1d](
+                                self.x, self.y, self.z, weight, self.q,
+                                self.ux, self.uy, self.uz, self.inv_gamma,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].Jr, grid[0].Jt, grid[0].Jz,
+                                grid[1].Jr, grid[1].Jt, grid[1].Jz,
+                                grid[2].Jr, grid[2].Jt, grid[2].Jz,
+                                grid[0].d_ruyten_cubic_coef,
+                                grid[1].d_ruyten_cubic_coef,
+                                grid[2].d_ruyten_cubic_coef)
                     else:
                         for m in range(Nm):
-                            deposit_J_gpu_linear_one_mode[
+                            if self.particle_shape == 'linear':
+                                deposit_J_gpu_unsorted_rel_linear[
+                                    dim_grid_1d, dim_block_1d](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    self.ux, self.uy, self.uz, self.inv_gamma,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].Jr, grid[m].Jt, grid[m].Jz, m,
+                                    grid[m].d_ruyten_linear_coef)
+                            else:
+                                deposit_J_gpu_unsorted_rel_cubic[
+                                    dim_grid_1d, dim_block_1d](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    self.ux, self.uy, self.uz, self.inv_gamma,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].Jr, grid[m].Jt, grid[m].Jz, m,
+                                    grid[m].d_ruyten_cubic_coef)
+                else:
+                    dim_grid_2d_flat, dim_block_2d_flat = \
+                        cuda_tpb_bpg_1d(self.prefix_sum.shape[0], TPB=self.deposit_tpb)
+                    # Deposit J in each of four directions
+                    if self.particle_shape == 'linear':
+                        if Nm == 2:
+                            deposit_J_gpu_linear[
                                 dim_grid_2d_flat, dim_block_2d_flat](
                                 self.x, self.y, self.z, weight, self.q,
                                 self.ux, self.uy, self.uz, self.inv_gamma,
-                                grid[m].invdz, grid[m].zmin, grid[m].Nz,
-                                grid[m].invdr, grid[m].rmin, grid[m].Nr,
-                                grid[m].Jr, grid[m].Jt, grid[m].Jz, m,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].Jr, grid[1].Jr,
+                                grid[0].Jt, grid[1].Jt,
+                                grid[0].Jz, grid[1].Jz,
                                 self.cell_idx, self.prefix_sum,
-                                grid[m].d_ruyten_linear_coef)
-                elif self.particle_shape == 'cubic':
-                    if Nm == 2:
-                        deposit_J_gpu_cubic[
-                            dim_grid_2d_flat, dim_block_2d_flat](
-                            self.x, self.y, self.z, weight, self.q,
-                            self.ux, self.uy, self.uz, self.inv_gamma,
-                            grid[0].invdz, grid[0].zmin, grid[0].Nz,
-                            grid[0].invdr, grid[0].rmin, grid[0].Nr,
-                            grid[0].Jr, grid[1].Jr,
-                            grid[0].Jt, grid[1].Jt,
-                            grid[0].Jz, grid[1].Jz,
-                            self.cell_idx, self.prefix_sum,
-                            grid[0].d_ruyten_cubic_coef,
-                            grid[1].d_ruyten_cubic_coef)
-                    else:
-                        for m in range(Nm):
-                            deposit_J_gpu_cubic_one_mode[
+                                grid[0].d_ruyten_linear_coef,
+                                grid[1].d_ruyten_linear_coef)
+                        else:
+                            for m in range(Nm):
+                                deposit_J_gpu_linear_one_mode[
+                                    dim_grid_2d_flat, dim_block_2d_flat](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    self.ux, self.uy, self.uz, self.inv_gamma,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].Jr, grid[m].Jt, grid[m].Jz, m,
+                                    self.cell_idx, self.prefix_sum,
+                                    grid[m].d_ruyten_linear_coef)
+                    elif self.particle_shape == 'cubic':
+                        if Nm == 2:
+                            deposit_J_gpu_cubic[
                                 dim_grid_2d_flat, dim_block_2d_flat](
                                 self.x, self.y, self.z, weight, self.q,
                                 self.ux, self.uy, self.uz, self.inv_gamma,
-                                grid[m].invdz, grid[m].zmin, grid[m].Nz,
-                                grid[m].invdr, grid[m].rmin, grid[m].Nr,
-                                grid[m].Jr, grid[m].Jt, grid[m].Jz, m,
+                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                grid[0].Jr, grid[1].Jr,
+                                grid[0].Jt, grid[1].Jt,
+                                grid[0].Jz, grid[1].Jz,
                                 self.cell_idx, self.prefix_sum,
-                                grid[m].d_ruyten_cubic_coef)
+                                grid[0].d_ruyten_cubic_coef,
+                                grid[1].d_ruyten_cubic_coef)
+                        else:
+                            for m in range(Nm):
+                                deposit_J_gpu_cubic_one_mode[
+                                    dim_grid_2d_flat, dim_block_2d_flat](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    self.ux, self.uy, self.uz, self.inv_gamma,
+                                    grid[m].invdz, grid[m].zmin, grid[m].Nz,
+                                    grid[m].invdr, grid[m].rmin, grid[m].Nr,
+                                    grid[m].Jr, grid[m].Jt, grid[m].Jz, m,
+                                    self.cell_idx, self.prefix_sum,
+                                    grid[m].d_ruyten_cubic_coef)
 
         # CPU version
         else:
@@ -1210,9 +1444,10 @@ class Particles(object) :
         # Shortcut for interpolation grids
         grid = fld.interp
         # Get the threads per block and the blocks per grid
-        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+            self.Ntot, TPB=self.sort_tpb )
         dim_grid_2d_flat, dim_block_2d_flat = \
-                cuda_tpb_bpg_1d( self.prefix_sum.shape[0] )
+                cuda_tpb_bpg_1d( self.prefix_sum.shape[0], TPB=self.sort_tpb )
 
         # ------------------------
         # Sorting of the particles

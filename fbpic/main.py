@@ -56,6 +56,7 @@ class Simulation(object):
                  initialize_ions=False, use_cuda=False, n_guard=None,
                  n_damp={'z':64, 'r':32},
                  exchange_period=None,
+                 clear_cupy_mempool_on_exchange=True,
                  current_correction='curl-free',
                  boundaries={'z':'periodic', 'r':'reflective'},
                  gamma_boost=None, use_all_mpi_ranks=True,
@@ -164,6 +165,12 @@ class Simulation(object):
             particles should never be able to travel more than
             (n_guard/2 - particle_shape order) cells. (Setting exchange_period
             to small values can substantially affect the performance)
+
+        clear_cupy_mempool_on_exchange: bool, optional
+            Whether to free all blocks of the CuPy default memory pool after
+            particle exchange. This can reduce memory pressure in runs with
+            strongly-varying particle counts, but may add overhead from more
+            frequent device allocations.
 
         boundaries: dict, optional
             A dictionary with 'z' and 'r' as keys, and strings as values.
@@ -328,6 +335,8 @@ class Simulation(object):
         self.iteration = 0
         # Register the filtering flag
         self.filter_currents = filter_currents
+        # Register memory-pool behavior for GPU particle exchange
+        self.clear_cupy_mempool_on_exchange = clear_cupy_mempool_on_exchange
 
         # Initialize an empty list of external fields
         self.external_fields = []
@@ -449,8 +458,9 @@ class Simulation(object):
                 # otherwise rho_prev is obtained from the previous iteration.)
                 self.deposit('rho_prev', exchange=(use_true_rho is True))
 
-                # For simulations on GPU, clear the memory pool used by cupy.
-                if self.use_cuda:
+                # For simulations on GPU, optionally clear the memory pool
+                # used by CuPy.
+                if self.use_cuda and self.clear_cupy_mempool_on_exchange:
                     mempool = cupy.get_default_memory_pool()
                     mempool.free_all_blocks()
 
