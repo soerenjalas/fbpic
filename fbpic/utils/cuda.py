@@ -122,7 +122,8 @@ def _read_positive_int_env(var_name):
     return parsed
 
 
-def get_cuda_copy_tpb(default_v100=(8, 32), default_other=(2, 16)):
+def get_cuda_copy_tpb(default_v100=(8, 32), default_a100=(8, 16),
+                      default_other=(2, 16)):
     """
     Return CUDA threads-per-block tuple for copy kernels.
 
@@ -135,7 +136,9 @@ def get_cuda_copy_tpb(default_v100=(8, 32), default_other=(2, 16)):
     if (tpbx is not None) and (tpby is not None):
         return (tpbx, tpby)
 
-    if cuda_gpu_model in ("V100", "A100"):
+    if cuda_gpu_model == "A100":
+        return default_a100
+    elif cuda_gpu_model == "V100":
         return default_v100
     else:
         return default_other

@@ -253,8 +253,15 @@ class Particles(object) :
                 self.deposit_tpb = 32
                 self.gather_tpb = 256
             else:
-                self.deposit_tpb = 16 if cuda_gpu_model in ("V100", "A100") else 8
-                self.gather_tpb = 128
+                if cuda_gpu_model == "A100":
+                    self.deposit_tpb = 16
+                    self.gather_tpb = 256
+                elif cuda_gpu_model == "V100":
+                    self.deposit_tpb = 16
+                    self.gather_tpb = 128
+                else:
+                    self.deposit_tpb = 8
+                    self.gather_tpb = 128
 
             deposit_tpb_env = os.environ.get('FBPIC_DEPOSIT_TPB')
             gather_tpb_env = os.environ.get('FBPIC_GATHER_TPB')
