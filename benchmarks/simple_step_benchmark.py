@@ -38,6 +38,8 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_SORT_TPB"] = str(args.sort_tpb)
     if args.disable_fused_ifft_scale:
         os.environ["FBPIC_FFT_FUSE_IFFT_SCALE"] = "0"
+    if args.use_unsorted_rho_deposition:
+        os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "1"
 
 
 def build_simulation(args):
@@ -147,6 +149,7 @@ def run_benchmark(args):
             print(f"gather_tpb          : {p0.gather_tpb}")
             print(f"push_tpb            : {getattr(p0, 'push_tpb', 'n/a')}")
             print(f"sort_tpb            : {getattr(p0, 'sort_tpb', 'n/a')}")
+            print(f"unsorted_rho        : {getattr(p0, 'use_unsorted_rho_deposition', 'n/a')}")
         else:
             print("deposit_tpb         : n/a")
             print("gather_tpb          : n/a")
@@ -234,6 +237,8 @@ def parse_args():
                    help="override FBPIC_SORT_TPB")
     p.add_argument("--disable-fused-ifft-scale", action="store_true",
                    help="disable fused iFFT normalization+copy kernel on GPU")
+    p.add_argument("--use-unsorted-rho-deposition", action="store_true",
+                   help="use unsorted atomic rho deposition on GPU (experimental, linear shape)")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")
