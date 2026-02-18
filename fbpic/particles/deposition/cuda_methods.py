@@ -1301,181 +1301,266 @@ def deposit_J_gpu_cubic_m3_supercell(x, y, z, w, q,
                         cell_idx, prefix_sum,
                         beta_n_m0, beta_n_m1, beta_n_m2):
     """
-    Experimental fused cubic J deposition for Nm=3.
+    Experimental fused cubic J deposition for Nm=3 (block-cooperative).
 
-    This kernel iterates over sorted particle cells (`prefix_sum`) and
-    accumulates contributions for m=0,1,2 in local per-cell buffers before
-    atomically flushing to global memory.
+    One CUDA block handles one sorted source cell (from `prefix_sum`). Threads
+    in the block iterate over particles of that cell, accumulate contributions
+    in shared memory, and then flush once to global memory.
     """
-    i = cuda.grid(1)
+    cell = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    tpb = cuda.blockDim.x
 
-    if i < prefix_sum.shape[0]:
-        # Retrieve index of upper grid point from flattened cell index.
-        iz_upper = int(i / (Nr + 1))
-        ir_upper = int(i - iz_upper * (Nr + 1))
+    if cell >= prefix_sum.shape[0]:
+        return
 
-        incl_offset = np.int32(prefix_sum[i])
-        if i > 0:
-            frequency_per_cell = np.int32(incl_offset - prefix_sum[i - 1])
+    incl_offset = np.int32(prefix_sum[cell])
+    if cell > 0:
+        frequency_per_cell = np.int32(incl_offset - prefix_sum[cell - 1])
+    else:
+        frequency_per_cell = np.int32(incl_offset)
+
+    if frequency_per_cell <= 0:
+        return
+
+    # Shared accumulators for 16-point cubic stencil (4 z x 4 r)
+    jr0_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jt0_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jz0_acc = cuda.shared.array(shape=16, dtype=np.float64)
+
+    jr1r_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jr1i_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jt1r_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jt1i_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jz1r_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jz1i_acc = cuda.shared.array(shape=16, dtype=np.float64)
+
+    jr2r_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jr2i_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jt2r_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jt2i_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jz2r_acc = cuda.shared.array(shape=16, dtype=np.float64)
+    jz2i_acc = cuda.shared.array(shape=16, dtype=np.float64)
+
+    # Cooperative zero-initialization of shared accumulators
+    for k in range(tid, 16, tpb):
+        jr0_acc[k] = 0.
+        jt0_acc[k] = 0.
+        jz0_acc[k] = 0.
+
+        jr1r_acc[k] = 0.
+        jr1i_acc[k] = 0.
+        jt1r_acc[k] = 0.
+        jt1i_acc[k] = 0.
+        jz1r_acc[k] = 0.
+        jz1i_acc[k] = 0.
+
+        jr2r_acc[k] = 0.
+        jr2i_acc[k] = 0.
+        jt2r_acc[k] = 0.
+        jt2i_acc[k] = 0.
+        jz2r_acc[k] = 0.
+        jz2i_acc[k] = 0.
+
+    cuda.syncthreads()
+
+    # Loop over particles in this source cell, distributed across threads
+    for j in range(tid, frequency_per_cell, tpb):
+        ptcl_idx = incl_offset - 1 - j
+
+        xj = x[ptcl_idx]
+        yj = y[ptcl_idx]
+        zj = z[ptcl_idx]
+
+        uxj = ux[ptcl_idx]
+        uyj = uy[ptcl_idx]
+        uzj = uz[ptcl_idx]
+        inv_gammaj = inv_gamma[ptcl_idx]
+        wj = q * w[ptcl_idx]
+
+        rj = math.sqrt(xj**2 + yj**2)
+        if rj != 0.:
+            invr = 1. / rj
+            cos = xj * invr
+            sin = yj * invr
         else:
-            frequency_per_cell = np.int32(incl_offset)
+            cos = 1.
+            sin = 0.
 
-        if frequency_per_cell <= 0:
-            return
+        cos2 = cos * cos - sin * sin
+        sin2 = 2. * cos * sin
 
-        # 16-point cubic stencil accumulators (4 z x 4 r)
-        jr0_acc = cuda.local.array(16, dtype=np.float64)
-        jt0_acc = cuda.local.array(16, dtype=np.float64)
-        jz0_acc = cuda.local.array(16, dtype=np.float64)
+        r_cell = invdr * (rj - rmin) - 0.5
+        z_cell = invdz * (zj - zmin) - 0.5
 
-        jr1r_acc = cuda.local.array(16, dtype=np.float64)
-        jr1i_acc = cuda.local.array(16, dtype=np.float64)
-        jt1r_acc = cuda.local.array(16, dtype=np.float64)
-        jt1i_acc = cuda.local.array(16, dtype=np.float64)
-        jz1r_acc = cuda.local.array(16, dtype=np.float64)
-        jz1i_acc = cuda.local.array(16, dtype=np.float64)
+        ir = min(int(math.ceil(r_cell)), Nr)
+        bn0 = beta_n_m0[ir]
+        bn1 = beta_n_m1[ir]
+        bn2 = beta_n_m2[ir]
 
-        jr2r_acc = cuda.local.array(16, dtype=np.float64)
-        jr2i_acc = cuda.local.array(16, dtype=np.float64)
-        jt2r_acc = cuda.local.array(16, dtype=np.float64)
-        jt2i_acc = cuda.local.array(16, dtype=np.float64)
-        jz2r_acc = cuda.local.array(16, dtype=np.float64)
-        jz2i_acc = cuda.local.array(16, dtype=np.float64)
+        sz0 = Sz_cubic(z_cell, 0)
+        sz1 = Sz_cubic(z_cell, 1)
+        sz2 = Sz_cubic(z_cell, 2)
+        sz3 = Sz_cubic(z_cell, 3)
 
-        for k in range(16):
-            jr0_acc[k] = 0.
-            jt0_acc[k] = 0.
-            jz0_acc[k] = 0.
+        sr_rt00 = Sr_cubic(r_cell, 0, -1, bn0)
+        sr_rt01 = Sr_cubic(r_cell, 1, -1, bn0)
+        sr_rt02 = Sr_cubic(r_cell, 2, -1, bn0)
+        sr_rt03 = Sr_cubic(r_cell, 3, -1, bn0)
 
-            jr1r_acc[k] = 0.
-            jr1i_acc[k] = 0.
-            jt1r_acc[k] = 0.
-            jt1i_acc[k] = 0.
-            jz1r_acc[k] = 0.
-            jz1i_acc[k] = 0.
+        sr_rt10 = Sr_cubic(r_cell, 0,  1, bn1)
+        sr_rt11 = Sr_cubic(r_cell, 1,  1, bn1)
+        sr_rt12 = Sr_cubic(r_cell, 2,  1, bn1)
+        sr_rt13 = Sr_cubic(r_cell, 3,  1, bn1)
 
-            jr2r_acc[k] = 0.
-            jr2i_acc[k] = 0.
-            jt2r_acc[k] = 0.
-            jt2i_acc[k] = 0.
-            jz2r_acc[k] = 0.
-            jz2i_acc[k] = 0.
+        sr_rt20 = Sr_cubic(r_cell, 0, -1, bn2)
+        sr_rt21 = Sr_cubic(r_cell, 1, -1, bn2)
+        sr_rt22 = Sr_cubic(r_cell, 2, -1, bn2)
+        sr_rt23 = Sr_cubic(r_cell, 3, -1, bn2)
 
-        for j in range(frequency_per_cell):
-            ptcl_idx = incl_offset - 1 - j
+        sr_z00 = Sr_cubic(r_cell, 0,  1, bn0)
+        sr_z01 = Sr_cubic(r_cell, 1,  1, bn0)
+        sr_z02 = Sr_cubic(r_cell, 2,  1, bn0)
+        sr_z03 = Sr_cubic(r_cell, 3,  1, bn0)
 
-            xj = x[ptcl_idx]
-            yj = y[ptcl_idx]
-            zj = z[ptcl_idx]
+        sr_z10 = Sr_cubic(r_cell, 0, -1, bn1)
+        sr_z11 = Sr_cubic(r_cell, 1, -1, bn1)
+        sr_z12 = Sr_cubic(r_cell, 2, -1, bn1)
+        sr_z13 = Sr_cubic(r_cell, 3, -1, bn1)
 
-            uxj = ux[ptcl_idx]
-            uyj = uy[ptcl_idx]
-            uzj = uz[ptcl_idx]
-            inv_gammaj = inv_gamma[ptcl_idx]
-            wj = q * w[ptcl_idx]
+        sr_z20 = Sr_cubic(r_cell, 0,  1, bn2)
+        sr_z21 = Sr_cubic(r_cell, 1,  1, bn2)
+        sr_z22 = Sr_cubic(r_cell, 2,  1, bn2)
+        sr_z23 = Sr_cubic(r_cell, 3,  1, bn2)
 
-            rj = math.sqrt(xj**2 + yj**2)
-            if rj != 0.:
-                invr = 1. / rj
-                cos = xj * invr
-                sin = yj * invr
-            else:
-                cos = 1.
-                sin = 0.
+        base = wj * c * inv_gammaj
+        jr0 = base * (cos * uxj + sin * uyj)
+        jt0 = base * (cos * uyj - sin * uxj)
+        jz0 = base * uzj
 
-            cos2 = cos * cos - sin * sin
-            sin2 = 2. * cos * sin
+        jr1_r = jr0 * cos
+        jr1_i = jr0 * sin
+        jt1_r = jt0 * cos
+        jt1_i = jt0 * sin
+        jz1_r = jz0 * cos
+        jz1_i = jz0 * sin
 
-            r_cell = invdr * (rj - rmin) - 0.5
-            z_cell = invdz * (zj - zmin) - 0.5
+        jr2_r = jr0 * cos2
+        jr2_i = jr0 * sin2
+        jt2_r = jt0 * cos2
+        jt2_i = jt0 * sin2
+        jz2_r = jz0 * cos2
+        jz2_i = jz0 * sin2
 
-            ir = min(int(math.ceil(r_cell)), Nr)
-            bn0 = beta_n_m0[ir]
-            bn1 = beta_n_m1[ir]
-            bn2 = beta_n_m2[ir]
+        szs0 = (sz0, sz1, sz2, sz3)
 
-            Sz = (
-                Sz_cubic(z_cell, 0), Sz_cubic(z_cell, 1),
-                Sz_cubic(z_cell, 2), Sz_cubic(z_cell, 3)
-            )
+        for ia in range(4):
+            sz = szs0[ia]
+            row = 4 * ia
 
-            Sr_rt0 = (
-                Sr_cubic(r_cell, 0, -1, bn0), Sr_cubic(r_cell, 1, -1, bn0),
-                Sr_cubic(r_cell, 2, -1, bn0), Sr_cubic(r_cell, 3, -1, bn0)
-            )
-            Sr_rt1 = (
-                Sr_cubic(r_cell, 0,  1, bn1), Sr_cubic(r_cell, 1,  1, bn1),
-                Sr_cubic(r_cell, 2,  1, bn1), Sr_cubic(r_cell, 3,  1, bn1)
-            )
-            Sr_rt2 = (
-                Sr_cubic(r_cell, 0, -1, bn2), Sr_cubic(r_cell, 1, -1, bn2),
-                Sr_cubic(r_cell, 2, -1, bn2), Sr_cubic(r_cell, 3, -1, bn2)
-            )
+            # ib = 0
+            idx = row
+            w_rt0 = sz * sr_rt00
+            w_rt1 = sz * sr_rt10
+            w_rt2 = sz * sr_rt20
+            w_z0 = sz * sr_z00
+            w_z1 = sz * sr_z10
+            w_z2 = sz * sr_z20
+            cuda.atomic.add(jr0_acc, idx, w_rt0 * jr0)
+            cuda.atomic.add(jt0_acc, idx, w_rt0 * jt0)
+            cuda.atomic.add(jz0_acc, idx, w_z0 * jz0)
+            cuda.atomic.add(jr1r_acc, idx, w_rt1 * jr1_r)
+            cuda.atomic.add(jr1i_acc, idx, w_rt1 * jr1_i)
+            cuda.atomic.add(jt1r_acc, idx, w_rt1 * jt1_r)
+            cuda.atomic.add(jt1i_acc, idx, w_rt1 * jt1_i)
+            cuda.atomic.add(jz1r_acc, idx, w_z1 * jz1_r)
+            cuda.atomic.add(jz1i_acc, idx, w_z1 * jz1_i)
+            cuda.atomic.add(jr2r_acc, idx, w_rt2 * jr2_r)
+            cuda.atomic.add(jr2i_acc, idx, w_rt2 * jr2_i)
+            cuda.atomic.add(jt2r_acc, idx, w_rt2 * jt2_r)
+            cuda.atomic.add(jt2i_acc, idx, w_rt2 * jt2_i)
+            cuda.atomic.add(jz2r_acc, idx, w_z2 * jz2_r)
+            cuda.atomic.add(jz2i_acc, idx, w_z2 * jz2_i)
 
-            Sr_z0 = (
-                Sr_cubic(r_cell, 0,  1, bn0), Sr_cubic(r_cell, 1,  1, bn0),
-                Sr_cubic(r_cell, 2,  1, bn0), Sr_cubic(r_cell, 3,  1, bn0)
-            )
-            Sr_z1 = (
-                Sr_cubic(r_cell, 0, -1, bn1), Sr_cubic(r_cell, 1, -1, bn1),
-                Sr_cubic(r_cell, 2, -1, bn1), Sr_cubic(r_cell, 3, -1, bn1)
-            )
-            Sr_z2 = (
-                Sr_cubic(r_cell, 0,  1, bn2), Sr_cubic(r_cell, 1,  1, bn2),
-                Sr_cubic(r_cell, 2,  1, bn2), Sr_cubic(r_cell, 3,  1, bn2)
-            )
+            # ib = 1
+            idx = row + 1
+            w_rt0 = sz * sr_rt01
+            w_rt1 = sz * sr_rt11
+            w_rt2 = sz * sr_rt21
+            w_z0 = sz * sr_z01
+            w_z1 = sz * sr_z11
+            w_z2 = sz * sr_z21
+            cuda.atomic.add(jr0_acc, idx, w_rt0 * jr0)
+            cuda.atomic.add(jt0_acc, idx, w_rt0 * jt0)
+            cuda.atomic.add(jz0_acc, idx, w_z0 * jz0)
+            cuda.atomic.add(jr1r_acc, idx, w_rt1 * jr1_r)
+            cuda.atomic.add(jr1i_acc, idx, w_rt1 * jr1_i)
+            cuda.atomic.add(jt1r_acc, idx, w_rt1 * jt1_r)
+            cuda.atomic.add(jt1i_acc, idx, w_rt1 * jt1_i)
+            cuda.atomic.add(jz1r_acc, idx, w_z1 * jz1_r)
+            cuda.atomic.add(jz1i_acc, idx, w_z1 * jz1_i)
+            cuda.atomic.add(jr2r_acc, idx, w_rt2 * jr2_r)
+            cuda.atomic.add(jr2i_acc, idx, w_rt2 * jr2_i)
+            cuda.atomic.add(jt2r_acc, idx, w_rt2 * jt2_r)
+            cuda.atomic.add(jt2i_acc, idx, w_rt2 * jt2_i)
+            cuda.atomic.add(jz2r_acc, idx, w_z2 * jz2_r)
+            cuda.atomic.add(jz2i_acc, idx, w_z2 * jz2_i)
 
-            base = wj * c * inv_gammaj
-            jr0 = base * (cos * uxj + sin * uyj)
-            jt0 = base * (cos * uyj - sin * uxj)
-            jz0 = base * uzj
+            # ib = 2
+            idx = row + 2
+            w_rt0 = sz * sr_rt02
+            w_rt1 = sz * sr_rt12
+            w_rt2 = sz * sr_rt22
+            w_z0 = sz * sr_z02
+            w_z1 = sz * sr_z12
+            w_z2 = sz * sr_z22
+            cuda.atomic.add(jr0_acc, idx, w_rt0 * jr0)
+            cuda.atomic.add(jt0_acc, idx, w_rt0 * jt0)
+            cuda.atomic.add(jz0_acc, idx, w_z0 * jz0)
+            cuda.atomic.add(jr1r_acc, idx, w_rt1 * jr1_r)
+            cuda.atomic.add(jr1i_acc, idx, w_rt1 * jr1_i)
+            cuda.atomic.add(jt1r_acc, idx, w_rt1 * jt1_r)
+            cuda.atomic.add(jt1i_acc, idx, w_rt1 * jt1_i)
+            cuda.atomic.add(jz1r_acc, idx, w_z1 * jz1_r)
+            cuda.atomic.add(jz1i_acc, idx, w_z1 * jz1_i)
+            cuda.atomic.add(jr2r_acc, idx, w_rt2 * jr2_r)
+            cuda.atomic.add(jr2i_acc, idx, w_rt2 * jr2_i)
+            cuda.atomic.add(jt2r_acc, idx, w_rt2 * jt2_r)
+            cuda.atomic.add(jt2i_acc, idx, w_rt2 * jt2_i)
+            cuda.atomic.add(jz2r_acc, idx, w_z2 * jz2_r)
+            cuda.atomic.add(jz2i_acc, idx, w_z2 * jz2_i)
 
-            jr1_r = jr0 * cos
-            jr1_i = jr0 * sin
-            jt1_r = jt0 * cos
-            jt1_i = jt0 * sin
-            jz1_r = jz0 * cos
-            jz1_i = jz0 * sin
+            # ib = 3
+            idx = row + 3
+            w_rt0 = sz * sr_rt03
+            w_rt1 = sz * sr_rt13
+            w_rt2 = sz * sr_rt23
+            w_z0 = sz * sr_z03
+            w_z1 = sz * sr_z13
+            w_z2 = sz * sr_z23
+            cuda.atomic.add(jr0_acc, idx, w_rt0 * jr0)
+            cuda.atomic.add(jt0_acc, idx, w_rt0 * jt0)
+            cuda.atomic.add(jz0_acc, idx, w_z0 * jz0)
+            cuda.atomic.add(jr1r_acc, idx, w_rt1 * jr1_r)
+            cuda.atomic.add(jr1i_acc, idx, w_rt1 * jr1_i)
+            cuda.atomic.add(jt1r_acc, idx, w_rt1 * jt1_r)
+            cuda.atomic.add(jt1i_acc, idx, w_rt1 * jt1_i)
+            cuda.atomic.add(jz1r_acc, idx, w_z1 * jz1_r)
+            cuda.atomic.add(jz1i_acc, idx, w_z1 * jz1_i)
+            cuda.atomic.add(jr2r_acc, idx, w_rt2 * jr2_r)
+            cuda.atomic.add(jr2i_acc, idx, w_rt2 * jr2_i)
+            cuda.atomic.add(jt2r_acc, idx, w_rt2 * jt2_r)
+            cuda.atomic.add(jt2i_acc, idx, w_rt2 * jt2_i)
+            cuda.atomic.add(jz2r_acc, idx, w_z2 * jz2_r)
+            cuda.atomic.add(jz2i_acc, idx, w_z2 * jz2_i)
 
-            jr2_r = jr0 * cos2
-            jr2_i = jr0 * sin2
-            jt2_r = jt0 * cos2
-            jt2_i = jt0 * sin2
-            jz2_r = jz0 * cos2
-            jz2_i = jz0 * sin2
+    cuda.syncthreads()
 
-            for ia in range(4):
-                sz = Sz[ia]
-                row = 4 * ia
-                for ib in range(4):
-                    idx = row + ib
+    # Flush shared accumulators to global arrays once per stencil point
+    if tid < 16:
+        iz_upper = int(cell / (Nr + 1))
+        ir_upper = int(cell - iz_upper * (Nr + 1))
 
-                    w_rt0 = sz * Sr_rt0[ib]
-                    w_rt1 = sz * Sr_rt1[ib]
-                    w_rt2 = sz * Sr_rt2[ib]
-                    w_z0 = sz * Sr_z0[ib]
-                    w_z1 = sz * Sr_z1[ib]
-                    w_z2 = sz * Sr_z2[ib]
-
-                    jr0_acc[idx] += w_rt0 * jr0
-                    jt0_acc[idx] += w_rt0 * jt0
-                    jz0_acc[idx] += w_z0 * jz0
-
-                    jr1r_acc[idx] += w_rt1 * jr1_r
-                    jr1i_acc[idx] += w_rt1 * jr1_i
-                    jt1r_acc[idx] += w_rt1 * jt1_r
-                    jt1i_acc[idx] += w_rt1 * jt1_i
-                    jz1r_acc[idx] += w_z1 * jz1_r
-                    jz1i_acc[idx] += w_z1 * jz1_i
-
-                    jr2r_acc[idx] += w_rt2 * jr2_r
-                    jr2i_acc[idx] += w_rt2 * jr2_i
-                    jt2r_acc[idx] += w_rt2 * jt2_r
-                    jt2i_acc[idx] += w_rt2 * jt2_i
-                    jz2r_acc[idx] += w_z2 * jz2_r
-                    jz2i_acc[idx] += w_z2 * jz2_i
-
-        # Output indices for this source cell.
         iz0 = iz_upper - 2
         iz1 = iz_upper - 1
         iz2 = iz_upper
@@ -1496,30 +1581,43 @@ def deposit_J_gpu_cubic_m3_supercell(x, y, z, w, q,
         if ir1 < 0:
             ir1 = -(1 + ir1)
 
-        izs = (iz0, iz1, iz2, iz3)
-        irs = (ir0, ir1, ir2, ir3)
+        ia = int(tid / 4)
+        ib = int(tid - 4 * ia)
 
-        for ia in range(4):
-            izp = izs[ia]
-            row = 4 * ia
-            for ib in range(4):
-                irp = irs[ib]
-                idx = row + ib
+        if ia == 0:
+            izp = iz0
+        elif ia == 1:
+            izp = iz1
+        elif ia == 2:
+            izp = iz2
+        else:
+            izp = iz3
 
-                cuda.atomic.add(j_r_m0.real, (izp, irp), jr0_acc[idx])
-                cuda.atomic.add(j_t_m0.real, (izp, irp), jt0_acc[idx])
-                cuda.atomic.add(j_z_m0.real, (izp, irp), jz0_acc[idx])
+        if ib == 0:
+            irp = ir0
+        elif ib == 1:
+            irp = ir1
+        elif ib == 2:
+            irp = ir2
+        else:
+            irp = ir3
 
-                cuda.atomic.add(j_r_m1.real, (izp, irp), jr1r_acc[idx])
-                cuda.atomic.add(j_r_m1.imag, (izp, irp), jr1i_acc[idx])
-                cuda.atomic.add(j_t_m1.real, (izp, irp), jt1r_acc[idx])
-                cuda.atomic.add(j_t_m1.imag, (izp, irp), jt1i_acc[idx])
-                cuda.atomic.add(j_z_m1.real, (izp, irp), jz1r_acc[idx])
-                cuda.atomic.add(j_z_m1.imag, (izp, irp), jz1i_acc[idx])
+        idx = tid
+        cuda.atomic.add(j_r_m0.real, (izp, irp), jr0_acc[idx])
+        cuda.atomic.add(j_t_m0.real, (izp, irp), jt0_acc[idx])
+        cuda.atomic.add(j_z_m0.real, (izp, irp), jz0_acc[idx])
 
-                cuda.atomic.add(j_r_m2.real, (izp, irp), jr2r_acc[idx])
-                cuda.atomic.add(j_r_m2.imag, (izp, irp), jr2i_acc[idx])
-                cuda.atomic.add(j_t_m2.real, (izp, irp), jt2r_acc[idx])
-                cuda.atomic.add(j_t_m2.imag, (izp, irp), jt2i_acc[idx])
-                cuda.atomic.add(j_z_m2.real, (izp, irp), jz2r_acc[idx])
-                cuda.atomic.add(j_z_m2.imag, (izp, irp), jz2i_acc[idx])
+        cuda.atomic.add(j_r_m1.real, (izp, irp), jr1r_acc[idx])
+        cuda.atomic.add(j_r_m1.imag, (izp, irp), jr1i_acc[idx])
+        cuda.atomic.add(j_t_m1.real, (izp, irp), jt1r_acc[idx])
+        cuda.atomic.add(j_t_m1.imag, (izp, irp), jt1i_acc[idx])
+        cuda.atomic.add(j_z_m1.real, (izp, irp), jz1r_acc[idx])
+        cuda.atomic.add(j_z_m1.imag, (izp, irp), jz1i_acc[idx])
+
+        cuda.atomic.add(j_r_m2.real, (izp, irp), jr2r_acc[idx])
+        cuda.atomic.add(j_r_m2.imag, (izp, irp), jr2i_acc[idx])
+        cuda.atomic.add(j_t_m2.real, (izp, irp), jt2r_acc[idx])
+        cuda.atomic.add(j_t_m2.imag, (izp, irp), jt2i_acc[idx])
+        cuda.atomic.add(j_z_m2.real, (izp, irp), jz2r_acc[idx])
+        cuda.atomic.add(j_z_m2.imag, (izp, irp), jz2i_acc[idx])
+

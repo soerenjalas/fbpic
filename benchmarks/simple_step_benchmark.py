@@ -34,6 +34,8 @@ def apply_kernel_env_overrides(args):
         raise ValueError("Cannot set both --use-cuda-fastmath and --disable-cuda-fastmath")
     if args.use_supercell_j_deposition and args.disable_supercell_j_deposition:
         raise ValueError("Cannot set both --use-supercell-j-deposition and --disable-supercell-j-deposition")
+    if args.use_supercell_j_deposition and args.use_unsorted_j_deposition:
+        raise ValueError("--use-supercell-j-deposition and --use-unsorted-j-deposition are mutually exclusive")
 
     if args.deposit_tpb is not None:
         os.environ["FBPIC_DEPOSIT_TPB"] = str(args.deposit_tpb)

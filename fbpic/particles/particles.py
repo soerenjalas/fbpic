@@ -1259,10 +1259,12 @@ class Particles(object) :
                 )
 
                 if use_supercell_J:
-                    dim_grid_2d_flat, dim_block_2d_flat = \
-                        cuda_tpb_bpg_1d(self.prefix_sum.shape[0], TPB=self.deposit_tpb)
+                    # One CUDA block per source cell for cooperative
+                    # shared-memory accumulation.
+                    dim_grid_cells = self.prefix_sum.shape[0]
+                    dim_block_1d = self.deposit_tpb
                     deposit_J_gpu_cubic_m3_supercell[
-                        dim_grid_2d_flat, dim_block_2d_flat](
+                        dim_grid_cells, dim_block_1d](
                         self.x, self.y, self.z, weight, self.q,
                         self.ux, self.uy, self.uz, self.inv_gamma,
                         grid[0].invdz, grid[0].zmin, grid[0].Nz,
