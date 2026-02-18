@@ -24,6 +24,38 @@ Sr_linear = cuda.jit(Sr_linear, device=True, inline=INLINE_PARTICLE_SHAPES)
 Sz_cubic = cuda.jit(Sz_cubic, device=True, inline=INLINE_PARTICLE_SHAPES)
 Sr_cubic = cuda.jit(Sr_cubic, device=True, inline=INLINE_PARTICLE_SHAPES)
 
+
+@cuda.jit(device=True, inline=False)
+def Sz_cubic_from_u(u, index):
+    """Cubic longitudinal shape from precomputed local coordinate u in [0,1)."""
+    if index == 0:
+        return (1./6.)*(1.-u)**3
+    elif index == 1:
+        return (1./6.)*(3.*u**3 - 6.*u**2 + 4.)
+    elif index == 2:
+        return (1./6.)*(3.*(1.-u)**3 - 6.*(1.-u)**2 + 4.)
+    else:
+        return (1./6.)*u**3
+
+
+@cuda.jit(device=True, inline=False)
+def Sr_cubic_from_u_ir(u, ir_shape, index, flip, beta_n):
+    """Cubic radial shape from precomputed u and radial base index ir_shape."""
+    if index == 0:
+        s = (1./6.)*(1.-u)**3
+    elif index == 1:
+        s = (1./6.)*(3.*u**3 - 6.*u**2 + 4.)
+        s += beta_n*(1.-u)*u
+    elif index == 2:
+        s = (1./6.)*(3.*(1.-u)**3 - 6.*(1.-u)**2 + 4.)
+        s -= beta_n*(1.-u)*u
+    else:
+        s = (1./6.)*u**3
+
+    if index + ir_shape < 0:
+        s *= flip
+    return s
+
 @compile_cupy
 def deposit_rho_gpu_unsorted(x, y, z, w, q,
                         invdz, zmin, Nz,
@@ -1084,8 +1116,10 @@ def deposit_rho_gpu_unsorted_cubic_m3(x, y, z, w, q,
         r_cell = invdr*(rj - rmin) - 0.5
         z_cell = invdz*(zj - zmin) - 0.5
 
-        ir = min( int(math.ceil(r_cell)), Nr )
-        iz = int(math.ceil(z_cell))
+        ir_raw = int(math.ceil(r_cell))
+        ir = min(ir_raw, Nr)
+        iz_raw = int(math.ceil(z_cell))
+        iz = iz_raw
         if iz < 0:
             iz += Nz
         elif iz >= Nz:
@@ -1115,24 +1149,34 @@ def deposit_rho_gpu_unsorted_cubic_m3(x, y, z, w, q,
         bn1 = beta_n_m1[ir]
         bn2 = beta_n_m2[ir]
 
+        u_z = z_cell - (iz_raw - 2) - 1.
+        ir_shape = ir_raw - 2
+        u_r = r_cell - ir_shape - 1.
+
         Sz = (
-            Sz_cubic(z_cell, 0), Sz_cubic(z_cell, 1),
-            Sz_cubic(z_cell, 2), Sz_cubic(z_cell, 3)
+            Sz_cubic_from_u(u_z, 0), Sz_cubic_from_u(u_z, 1),
+            Sz_cubic_from_u(u_z, 2), Sz_cubic_from_u(u_z, 3)
         )
         izs = (iz0, iz1, iz2, iz3)
         irs = (ir0, ir1, ir2, ir3)
 
         Sr0 = (
-            Sr_cubic(r_cell, 0,  1, bn0), Sr_cubic(r_cell, 1,  1, bn0),
-            Sr_cubic(r_cell, 2,  1, bn0), Sr_cubic(r_cell, 3,  1, bn0)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0,  1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1,  1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2,  1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3,  1, bn0)
         )
         Sr1 = (
-            Sr_cubic(r_cell, 0, -1, bn1), Sr_cubic(r_cell, 1, -1, bn1),
-            Sr_cubic(r_cell, 2, -1, bn1), Sr_cubic(r_cell, 3, -1, bn1)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0, -1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1, -1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2, -1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3, -1, bn1)
         )
         Sr2 = (
-            Sr_cubic(r_cell, 0,  1, bn2), Sr_cubic(r_cell, 1,  1, bn2),
-            Sr_cubic(r_cell, 2,  1, bn2), Sr_cubic(r_cell, 3,  1, bn2)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0,  1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1,  1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2,  1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3,  1, bn2)
         )
 
         R0 = wj
@@ -1326,8 +1370,10 @@ def deposit_J_gpu_unsorted_rel_cubic_m3(x, y, z, w, q,
         r_cell = invdr*(rj - rmin) - 0.5
         z_cell = invdz*(zj - zmin) - 0.5
 
-        ir = min( int(math.ceil(r_cell)), Nr )
-        iz = int(math.ceil(z_cell))
+        ir_raw = int(math.ceil(r_cell))
+        ir = min(ir_raw, Nr)
+        iz_raw = int(math.ceil(z_cell))
+        iz = iz_raw
         if iz < 0:
             iz += Nz
         elif iz >= Nz:
@@ -1357,38 +1403,54 @@ def deposit_J_gpu_unsorted_rel_cubic_m3(x, y, z, w, q,
         bn1 = beta_n_m1[ir]
         bn2 = beta_n_m2[ir]
 
+        u_z = z_cell - (iz_raw - 2) - 1.
+        ir_shape = ir_raw - 2
+        u_r = r_cell - ir_shape - 1.
+
         Sz = (
-            Sz_cubic(z_cell, 0), Sz_cubic(z_cell, 1),
-            Sz_cubic(z_cell, 2), Sz_cubic(z_cell, 3)
+            Sz_cubic_from_u(u_z, 0), Sz_cubic_from_u(u_z, 1),
+            Sz_cubic_from_u(u_z, 2), Sz_cubic_from_u(u_z, 3)
         )
         izs = (iz0, iz1, iz2, iz3)
         irs = (ir0, ir1, ir2, ir3)
 
         # For Jr/Jt use sign -(-1)^m ; for Jz use sign (+-1)^m
         Sr_rt0 = (
-            Sr_cubic(r_cell, 0, -1, bn0), Sr_cubic(r_cell, 1, -1, bn0),
-            Sr_cubic(r_cell, 2, -1, bn0), Sr_cubic(r_cell, 3, -1, bn0)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0, -1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1, -1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2, -1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3, -1, bn0)
         )
         Sr_rt1 = (
-            Sr_cubic(r_cell, 0,  1, bn1), Sr_cubic(r_cell, 1,  1, bn1),
-            Sr_cubic(r_cell, 2,  1, bn1), Sr_cubic(r_cell, 3,  1, bn1)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0,  1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1,  1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2,  1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3,  1, bn1)
         )
         Sr_rt2 = (
-            Sr_cubic(r_cell, 0, -1, bn2), Sr_cubic(r_cell, 1, -1, bn2),
-            Sr_cubic(r_cell, 2, -1, bn2), Sr_cubic(r_cell, 3, -1, bn2)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0, -1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1, -1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2, -1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3, -1, bn2)
         )
 
         Sr_z0 = (
-            Sr_cubic(r_cell, 0,  1, bn0), Sr_cubic(r_cell, 1,  1, bn0),
-            Sr_cubic(r_cell, 2,  1, bn0), Sr_cubic(r_cell, 3,  1, bn0)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0,  1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1,  1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2,  1, bn0),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3,  1, bn0)
         )
         Sr_z1 = (
-            Sr_cubic(r_cell, 0, -1, bn1), Sr_cubic(r_cell, 1, -1, bn1),
-            Sr_cubic(r_cell, 2, -1, bn1), Sr_cubic(r_cell, 3, -1, bn1)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0, -1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1, -1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2, -1, bn1),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3, -1, bn1)
         )
         Sr_z2 = (
-            Sr_cubic(r_cell, 0,  1, bn2), Sr_cubic(r_cell, 1,  1, bn2),
-            Sr_cubic(r_cell, 2,  1, bn2), Sr_cubic(r_cell, 3,  1, bn2)
+            Sr_cubic_from_u_ir(u_r, ir_shape, 0,  1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 1,  1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 2,  1, bn2),
+            Sr_cubic_from_u_ir(u_r, ir_shape, 3,  1, bn2)
         )
 
         base = wj * c * inv_gammaj
