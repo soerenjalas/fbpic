@@ -36,6 +36,8 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_PUSH_TPB"] = str(args.push_tpb)
     if args.sort_tpb is not None:
         os.environ["FBPIC_SORT_TPB"] = str(args.sort_tpb)
+    if args.disable_fused_ifft_scale:
+        os.environ["FBPIC_FFT_FUSE_IFFT_SCALE"] = "0"
 
 
 def build_simulation(args):
@@ -156,6 +158,7 @@ def run_benchmark(args):
         dht_copy_tpb = getattr(sim.fld.trans[0].dht0, 'dim_block', 'n/a')
         print(f"fft_copy_tpb        : {fft_copy_tpb}")
         print(f"dht_copy_tpb        : {dht_copy_tpb}")
+        print(f"fuse_ifft_scale     : {getattr(sim.fld.trans[0].fft, 'fuse_ifft_scale', 'n/a')}")
     print(f"steps               : {args.steps}")
     print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
     print(f"particles (total)   : {n_particles}")
@@ -229,6 +232,8 @@ def parse_args():
                    help="override FBPIC_PUSH_TPB")
     p.add_argument("--sort-tpb", type=int, default=None,
                    help="override FBPIC_SORT_TPB")
+    p.add_argument("--disable-fused-ifft-scale", action="store_true",
+                   help="disable fused iFFT normalization+copy kernel on GPU")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")

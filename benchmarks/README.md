@@ -38,6 +38,7 @@ python benchmarks/simple_step_benchmark.py --use-cuda
   - `--copy-tpbx/--copy-tpby` (spectral copy kernels)
   - `--push-tpb` (particle push kernels)
   - `--sort-tpb` (sorting/rearrangement kernels)
+  - `--disable-fused-ifft-scale` (A/B test legacy iFFT normalization path)
 - Current built-in GPU defaults are architecture-aware (including A100),
   and overrides are useful for cluster-specific retuning.
 - For detailed profiling, see `docs/source/advanced/profiling.rst`.

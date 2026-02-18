@@ -6,6 +6,7 @@ This file is part of the Fourier-Bessel Partile-In-Cell code (FB-PIC)
 It defines the FFT object, which performs Fourier transforms along the axis 0,
 and is used in spectral_transformer.py
 """
+import os
 import numpy as np
 import numba
 # Check if CUDA is available, then import CUDA functions
@@ -78,6 +79,10 @@ class FFT(object):
             # Initialize the CUDA FFT plan object
             self.fft = cufft.Plan1d(Nz, cufft.CUFFT_Z2Z, Nr)
             self.inv_Nz = 1./Nz         # For normalization of the iFFT
+            # Whether to fuse inverse FFT normalization into copy kernel
+            # (set FBPIC_FFT_FUSE_IFFT_SCALE=0 to disable for A/B testing)
+            self.fuse_ifft_scale = os.environ.get(
+                'FBPIC_FFT_FUSE_IFFT_SCALE', '1').lower() not in ('0', 'false', 'no')
 
         # Initialize the object for calculation on the CPU
         else:
@@ -154,9 +159,15 @@ class FFT(object):
             self.fft.fft(self.buffer1d_in,
                          self.buffer1d_out,
                          cufft.CUFFT_INVERSE)
-            # Copy 1D arrays back to 2D array and normalize in one kernel
-            cuda_copy_1d_to_2d_and_scale[self.dim_grid, self.dim_block](
-                self.buffer1d_out, array_out, self.inv_Nz)
+            if self.fuse_ifft_scale:
+                # Copy 1D arrays back to 2D array and normalize in one kernel
+                cuda_copy_1d_to_2d_and_scale[self.dim_grid, self.dim_block](
+                    self.buffer1d_out, array_out, self.inv_Nz)
+            else:
+                # Legacy two-step path (useful for A/B profiling)
+                cupy.multiply(self.buffer1d_out, self.inv_Nz, out=self.buffer1d_out)
+                cuda_copy_1d_to_2d[self.dim_grid, self.dim_block](
+                    self.buffer1d_out, array_out)
         elif self.use_mkl:
             # Perform the inverse FFT on the CPU using MKL
             self.mklfft.inverse_transform( array_in, array_out )
