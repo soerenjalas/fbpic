@@ -564,6 +564,406 @@ def deposit_J_gpu_unsorted_rel_cubic(x, y, z, w, q,
 
 
 @compile_cupy
+def deposit_rho_gpu_unsorted_linear_m2(x, y, z, w, q,
+                        invdz, zmin, Nz,
+                        invdr, rmin, Nr,
+                        rho_m0, rho_m1,
+                        beta_n_m0, beta_n_m1):
+    """Unsorted fused rho deposition (linear shape) for modes m=0,1."""
+    i = cuda.grid(1)
+
+    if i < w.shape[0]:
+        xj = x[i]
+        yj = y[i]
+        zj = z[i]
+        wj = q * w[i]
+
+        rj = math.sqrt(xj**2 + yj**2)
+        if (rj != 0.):
+            invr = 1./rj
+            cos = xj*invr
+            sin = yj*invr
+        else:
+            cos = 1.
+            sin = 0.
+
+        exp1 = cos + 1.j*sin
+
+        r_cell = invdr*(rj - rmin) - 0.5
+        z_cell = invdz*(zj - zmin) - 0.5
+
+        ir = min( int(math.ceil(r_cell)), Nr )
+        iz = int(math.ceil(z_cell))
+        if iz < 0:
+            iz += Nz
+        elif iz >= Nz:
+            iz -= Nz
+
+        iz0 = iz - 1
+        iz1 = iz
+        if iz0 < 0:
+            iz0 += Nz
+        ir0 = ir - 1
+        ir1 = min(ir, Nr-1)
+        if ir0 < 0:
+            ir0 = -(1 + ir0)
+
+        bn0 = beta_n_m0[ir]
+        bn1 = beta_n_m1[ir]
+
+        Sz = (Sz_linear(z_cell, 0), Sz_linear(z_cell, 1))
+        izs = (iz0, iz1)
+        irs = (ir0, ir1)
+
+        Sr0 = (Sr_linear(r_cell, 0,  1, bn0), Sr_linear(r_cell, 1,  1, bn0))
+        Sr1 = (Sr_linear(r_cell, 0, -1, bn1), Sr_linear(r_cell, 1, -1, bn1))
+
+        R0 = wj
+        R1 = wj * exp1
+
+        for ia in range(2):
+            izp = izs[ia]
+            sz = Sz[ia]
+            for ib in range(2):
+                irp = irs[ib]
+
+                v0 = (sz * Sr0[ib]) * R0
+                v1 = (sz * Sr1[ib]) * R1
+
+                cuda.atomic.add(rho_m0.real, (izp, irp), v0)
+                cuda.atomic.add(rho_m1.real, (izp, irp), v1.real)
+                cuda.atomic.add(rho_m1.imag, (izp, irp), v1.imag)
+
+
+@compile_cupy
+def deposit_rho_gpu_unsorted_cubic_m2(x, y, z, w, q,
+                        invdz, zmin, Nz,
+                        invdr, rmin, Nr,
+                        rho_m0, rho_m1,
+                        beta_n_m0, beta_n_m1):
+    """Unsorted fused rho deposition (cubic shape) for modes m=0,1."""
+    i = cuda.grid(1)
+
+    if i < w.shape[0]:
+        xj = x[i]
+        yj = y[i]
+        zj = z[i]
+        wj = q * w[i]
+
+        rj = math.sqrt(xj**2 + yj**2)
+        if (rj != 0.):
+            invr = 1./rj
+            cos = xj*invr
+            sin = yj*invr
+        else:
+            cos = 1.
+            sin = 0.
+
+        exp1 = cos + 1.j*sin
+
+        r_cell = invdr*(rj - rmin) - 0.5
+        z_cell = invdz*(zj - zmin) - 0.5
+
+        ir = min( int(math.ceil(r_cell)), Nr )
+        iz = int(math.ceil(z_cell))
+        if iz < 0:
+            iz += Nz
+        elif iz >= Nz:
+            iz -= Nz
+
+        iz0 = iz - 2
+        iz1 = iz - 1
+        iz2 = iz
+        iz3 = iz + 1
+        if iz0 < 0:
+            iz0 += Nz
+        if iz1 < 0:
+            iz1 += Nz
+        if iz3 > Nz-1:
+            iz3 -= Nz
+
+        ir0 = ir - 2
+        ir1 = min(ir - 1, Nr-1)
+        ir2 = min(ir    , Nr-1)
+        ir3 = min(ir + 1, Nr-1)
+        if ir0 < 0:
+            ir0 = -(1 + ir0)
+        if ir1 < 0:
+            ir1 = -(1 + ir1)
+
+        bn0 = beta_n_m0[ir]
+        bn1 = beta_n_m1[ir]
+
+        Sz = (
+            Sz_cubic(z_cell, 0), Sz_cubic(z_cell, 1),
+            Sz_cubic(z_cell, 2), Sz_cubic(z_cell, 3)
+        )
+        izs = (iz0, iz1, iz2, iz3)
+        irs = (ir0, ir1, ir2, ir3)
+
+        Sr0 = (
+            Sr_cubic(r_cell, 0,  1, bn0), Sr_cubic(r_cell, 1,  1, bn0),
+            Sr_cubic(r_cell, 2,  1, bn0), Sr_cubic(r_cell, 3,  1, bn0)
+        )
+        Sr1 = (
+            Sr_cubic(r_cell, 0, -1, bn1), Sr_cubic(r_cell, 1, -1, bn1),
+            Sr_cubic(r_cell, 2, -1, bn1), Sr_cubic(r_cell, 3, -1, bn1)
+        )
+
+        R0 = wj
+        R1 = wj * exp1
+
+        for ia in range(4):
+            izp = izs[ia]
+            sz = Sz[ia]
+            for ib in range(4):
+                irp = irs[ib]
+
+                v0 = (sz * Sr0[ib]) * R0
+                v1 = (sz * Sr1[ib]) * R1
+
+                cuda.atomic.add(rho_m0.real, (izp, irp), v0)
+                cuda.atomic.add(rho_m1.real, (izp, irp), v1.real)
+                cuda.atomic.add(rho_m1.imag, (izp, irp), v1.imag)
+
+
+@compile_cupy
+def deposit_J_gpu_unsorted_rel_linear_m2(x, y, z, w, q,
+                        ux, uy, uz, inv_gamma,
+                        invdz, zmin, Nz,
+                        invdr, rmin, Nr,
+                        j_r_m0, j_t_m0, j_z_m0,
+                        j_r_m1, j_t_m1, j_z_m1,
+                        beta_n_m0, beta_n_m1):
+    """Unsorted fused relativistic J deposition (linear) for m=0,1."""
+    i = cuda.grid(1)
+
+    if i < w.shape[0]:
+        xj = x[i]
+        yj = y[i]
+        zj = z[i]
+
+        uxj = ux[i]
+        uyj = uy[i]
+        uzj = uz[i]
+        inv_gammaj = inv_gamma[i]
+        wj = q * w[i]
+
+        rj = math.sqrt(xj**2 + yj**2)
+        if (rj != 0.):
+            invr = 1./rj
+            cos = xj*invr
+            sin = yj*invr
+        else:
+            cos = 1.
+            sin = 0.
+
+        exp1 = cos + 1.j*sin
+
+        r_cell = invdr*(rj - rmin) - 0.5
+        z_cell = invdz*(zj - zmin) - 0.5
+
+        ir = min( int(math.ceil(r_cell)), Nr )
+        iz = int(math.ceil(z_cell))
+        if iz < 0:
+            iz += Nz
+        elif iz >= Nz:
+            iz -= Nz
+
+        iz0 = iz - 1
+        iz1 = iz
+        if iz0 < 0:
+            iz0 += Nz
+        ir0 = ir - 1
+        ir1 = min(ir, Nr-1)
+        if ir0 < 0:
+            ir0 = -(1 + ir0)
+
+        bn0 = beta_n_m0[ir]
+        bn1 = beta_n_m1[ir]
+
+        Sz = (Sz_linear(z_cell, 0), Sz_linear(z_cell, 1))
+        izs = (iz0, iz1)
+        irs = (ir0, ir1)
+
+        Sr_rt0 = (Sr_linear(r_cell, 0, -1, bn0), Sr_linear(r_cell, 1, -1, bn0))
+        Sr_rt1 = (Sr_linear(r_cell, 0,  1, bn1), Sr_linear(r_cell, 1,  1, bn1))
+
+        Sr_z0 = (Sr_linear(r_cell, 0,  1, bn0), Sr_linear(r_cell, 1,  1, bn0))
+        Sr_z1 = (Sr_linear(r_cell, 0, -1, bn1), Sr_linear(r_cell, 1, -1, bn1))
+
+        base = wj * c * inv_gammaj
+        jr0 = base * (cos*uxj + sin*uyj)
+        jt0 = base * (cos*uyj - sin*uxj)
+        jz0 = base * uzj
+
+        jr1 = jr0 * exp1
+        jt1 = jt0 * exp1
+        jz1 = jz0 * exp1
+
+        for ia in range(2):
+            izp = izs[ia]
+            sz = Sz[ia]
+            for ib in range(2):
+                irp = irs[ib]
+
+                w_rt0 = sz * Sr_rt0[ib]
+                w_rt1 = sz * Sr_rt1[ib]
+                w_z0 = sz * Sr_z0[ib]
+                w_z1 = sz * Sr_z1[ib]
+
+                vjr0 = w_rt0 * jr0
+                vjt0 = w_rt0 * jt0
+                vjz0 = w_z0  * jz0
+
+                vjr1 = w_rt1 * jr1
+                vjt1 = w_rt1 * jt1
+                vjz1 = w_z1  * jz1
+
+                cuda.atomic.add(j_r_m0.real, (izp, irp), vjr0.real)
+                cuda.atomic.add(j_t_m0.real, (izp, irp), vjt0.real)
+                cuda.atomic.add(j_z_m0.real, (izp, irp), vjz0.real)
+
+                cuda.atomic.add(j_r_m1.real, (izp, irp), vjr1.real)
+                cuda.atomic.add(j_r_m1.imag, (izp, irp), vjr1.imag)
+                cuda.atomic.add(j_t_m1.real, (izp, irp), vjt1.real)
+                cuda.atomic.add(j_t_m1.imag, (izp, irp), vjt1.imag)
+                cuda.atomic.add(j_z_m1.real, (izp, irp), vjz1.real)
+                cuda.atomic.add(j_z_m1.imag, (izp, irp), vjz1.imag)
+
+
+@compile_cupy
+def deposit_J_gpu_unsorted_rel_cubic_m2(x, y, z, w, q,
+                        ux, uy, uz, inv_gamma,
+                        invdz, zmin, Nz,
+                        invdr, rmin, Nr,
+                        j_r_m0, j_t_m0, j_z_m0,
+                        j_r_m1, j_t_m1, j_z_m1,
+                        beta_n_m0, beta_n_m1):
+    """Unsorted fused relativistic J deposition (cubic) for m=0,1."""
+    i = cuda.grid(1)
+
+    if i < w.shape[0]:
+        xj = x[i]
+        yj = y[i]
+        zj = z[i]
+
+        uxj = ux[i]
+        uyj = uy[i]
+        uzj = uz[i]
+        inv_gammaj = inv_gamma[i]
+        wj = q * w[i]
+
+        rj = math.sqrt(xj**2 + yj**2)
+        if (rj != 0.):
+            invr = 1./rj
+            cos = xj*invr
+            sin = yj*invr
+        else:
+            cos = 1.
+            sin = 0.
+
+        exp1 = cos + 1.j*sin
+
+        r_cell = invdr*(rj - rmin) - 0.5
+        z_cell = invdz*(zj - zmin) - 0.5
+
+        ir = min( int(math.ceil(r_cell)), Nr )
+        iz = int(math.ceil(z_cell))
+        if iz < 0:
+            iz += Nz
+        elif iz >= Nz:
+            iz -= Nz
+
+        iz0 = iz - 2
+        iz1 = iz - 1
+        iz2 = iz
+        iz3 = iz + 1
+        if iz0 < 0:
+            iz0 += Nz
+        if iz1 < 0:
+            iz1 += Nz
+        if iz3 > Nz-1:
+            iz3 -= Nz
+
+        ir0 = ir - 2
+        ir1 = min(ir - 1, Nr-1)
+        ir2 = min(ir    , Nr-1)
+        ir3 = min(ir + 1, Nr-1)
+        if ir0 < 0:
+            ir0 = -(1 + ir0)
+        if ir1 < 0:
+            ir1 = -(1 + ir1)
+
+        bn0 = beta_n_m0[ir]
+        bn1 = beta_n_m1[ir]
+
+        Sz = (
+            Sz_cubic(z_cell, 0), Sz_cubic(z_cell, 1),
+            Sz_cubic(z_cell, 2), Sz_cubic(z_cell, 3)
+        )
+        izs = (iz0, iz1, iz2, iz3)
+        irs = (ir0, ir1, ir2, ir3)
+
+        Sr_rt0 = (
+            Sr_cubic(r_cell, 0, -1, bn0), Sr_cubic(r_cell, 1, -1, bn0),
+            Sr_cubic(r_cell, 2, -1, bn0), Sr_cubic(r_cell, 3, -1, bn0)
+        )
+        Sr_rt1 = (
+            Sr_cubic(r_cell, 0,  1, bn1), Sr_cubic(r_cell, 1,  1, bn1),
+            Sr_cubic(r_cell, 2,  1, bn1), Sr_cubic(r_cell, 3,  1, bn1)
+        )
+
+        Sr_z0 = (
+            Sr_cubic(r_cell, 0,  1, bn0), Sr_cubic(r_cell, 1,  1, bn0),
+            Sr_cubic(r_cell, 2,  1, bn0), Sr_cubic(r_cell, 3,  1, bn0)
+        )
+        Sr_z1 = (
+            Sr_cubic(r_cell, 0, -1, bn1), Sr_cubic(r_cell, 1, -1, bn1),
+            Sr_cubic(r_cell, 2, -1, bn1), Sr_cubic(r_cell, 3, -1, bn1)
+        )
+
+        base = wj * c * inv_gammaj
+        jr0 = base * (cos*uxj + sin*uyj)
+        jt0 = base * (cos*uyj - sin*uxj)
+        jz0 = base * uzj
+
+        jr1 = jr0 * exp1
+        jt1 = jt0 * exp1
+        jz1 = jz0 * exp1
+
+        for ia in range(4):
+            izp = izs[ia]
+            sz = Sz[ia]
+            for ib in range(4):
+                irp = irs[ib]
+
+                w_rt0 = sz * Sr_rt0[ib]
+                w_rt1 = sz * Sr_rt1[ib]
+                w_z0 = sz * Sr_z0[ib]
+                w_z1 = sz * Sr_z1[ib]
+
+                vjr0 = w_rt0 * jr0
+                vjt0 = w_rt0 * jt0
+                vjz0 = w_z0  * jz0
+
+                vjr1 = w_rt1 * jr1
+                vjt1 = w_rt1 * jt1
+                vjz1 = w_z1  * jz1
+
+                cuda.atomic.add(j_r_m0.real, (izp, irp), vjr0.real)
+                cuda.atomic.add(j_t_m0.real, (izp, irp), vjt0.real)
+                cuda.atomic.add(j_z_m0.real, (izp, irp), vjz0.real)
+
+                cuda.atomic.add(j_r_m1.real, (izp, irp), vjr1.real)
+                cuda.atomic.add(j_r_m1.imag, (izp, irp), vjr1.imag)
+                cuda.atomic.add(j_t_m1.real, (izp, irp), vjt1.real)
+                cuda.atomic.add(j_t_m1.imag, (izp, irp), vjt1.imag)
+                cuda.atomic.add(j_z_m1.real, (izp, irp), vjz1.real)
+                cuda.atomic.add(j_z_m1.imag, (izp, irp), vjz1.imag)
+
+
+@compile_cupy
 def deposit_rho_gpu_unsorted_linear_m3(x, y, z, w, q,
                         invdz, zmin, Nz,
                         invdr, rmin, Nr,
