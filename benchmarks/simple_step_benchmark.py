@@ -138,11 +138,24 @@ def run_benchmark(args):
     print("=== FBPIC Simple Step Benchmark ===")
     print(f"backend             : {'GPU' if sim.use_cuda else 'CPU'}")
     if sim.use_cuda:
-        print(f"deposit_tpb         : {os.environ.get('FBPIC_DEPOSIT_TPB', 'default')}")
-        print(f"gather_tpb          : {os.environ.get('FBPIC_GATHER_TPB', 'default')}")
-        print(f"push_tpb            : {os.environ.get('FBPIC_PUSH_TPB', 'default')}")
-        print(f"sort_tpb            : {os.environ.get('FBPIC_SORT_TPB', 'default')}")
-        print(f"copy_tpb            : ({os.environ.get('FBPIC_COPY_TPBX', 'default')}, {os.environ.get('FBPIC_COPY_TPBY', 'default')})")
+        # Print resolved kernel launch settings (not only env overrides)
+        if len(sim.ptcl) > 0:
+            p0 = sim.ptcl[0]
+            print(f"deposit_tpb         : {p0.deposit_tpb}")
+            print(f"gather_tpb          : {p0.gather_tpb}")
+            print(f"push_tpb            : {getattr(p0, 'push_tpb', 'n/a')}")
+            print(f"sort_tpb            : {getattr(p0, 'sort_tpb', 'n/a')}")
+        else:
+            print("deposit_tpb         : n/a")
+            print("gather_tpb          : n/a")
+            print("push_tpb            : n/a")
+            print("sort_tpb            : n/a")
+
+        # The copy kernels are configured in both FFT and DHT transforms
+        fft_copy_tpb = getattr(sim.fld.trans[0].fft, 'dim_block', 'n/a')
+        dht_copy_tpb = getattr(sim.fld.trans[0].dht0, 'dim_block', 'n/a')
+        print(f"fft_copy_tpb        : {fft_copy_tpb}")
+        print(f"dht_copy_tpb        : {dht_copy_tpb}")
     print(f"steps               : {args.steps}")
     print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
     print(f"particles (total)   : {n_particles}")
