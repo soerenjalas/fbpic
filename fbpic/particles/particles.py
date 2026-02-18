@@ -247,8 +247,9 @@ class Particles(object) :
             self.prefix_sum_shift = 0
             # Register boolean that records if the particles are sorted or not
             self.sorted = False
-            # Define number of CUDA threads per block for deposition
-            # and gathering kernels (can be overridden via environment)
+            # Define number of CUDA threads per block for deposition,
+            # gathering, push and sorting kernels
+            # (can be overridden via environment)
             if particle_shape == "cubic":
                 self.deposit_tpb = 32
                 self.gather_tpb = 256
@@ -262,9 +263,13 @@ class Particles(object) :
                 else:
                     self.deposit_tpb = 8
                     self.gather_tpb = 128
+            self.push_tpb = 256
+            self.sort_tpb = 256
 
             deposit_tpb_env = os.environ.get('FBPIC_DEPOSIT_TPB')
             gather_tpb_env = os.environ.get('FBPIC_GATHER_TPB')
+            push_tpb_env = os.environ.get('FBPIC_PUSH_TPB')
+            sort_tpb_env = os.environ.get('FBPIC_SORT_TPB')
             if deposit_tpb_env is not None:
                 try:
                     deposit_tpb = int(deposit_tpb_env)
@@ -282,6 +287,24 @@ class Particles(object) :
                 except ValueError:
                     warnings.warn(
                         f"Ignoring invalid FBPIC_GATHER_TPB={gather_tpb_env!r}"
+                    )
+            if push_tpb_env is not None:
+                try:
+                    push_tpb = int(push_tpb_env)
+                    if push_tpb > 0:
+                        self.push_tpb = push_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_PUSH_TPB={push_tpb_env!r}"
+                    )
+            if sort_tpb_env is not None:
+                try:
+                    sort_tpb = int(sort_tpb_env)
+                    if sort_tpb > 0:
+                        self.sort_tpb = sort_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_SORT_TPB={sort_tpb_env!r}"
                     )
 
     def send_particles_to_gpu( self ):
@@ -684,7 +707,8 @@ class Particles(object) :
         the rearranged data.
         """
         # Get the threads per block and the blocks per grid
-        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+            self.Ntot, TPB=self.sort_tpb )
         # Iterate over (float) particle attributes
         attr_list = [ (self,'x'), (self,'y'), (self,'z'), \
                         (self,'ux'), (self,'uy'), (self,'uz'), \
@@ -761,7 +785,8 @@ class Particles(object) :
         # GPU (CUDA) version
         if self.use_cuda:
             # Get the threads per block and the blocks per grid
-            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+                self.Ntot, TPB=self.push_tpb )
             # Call the CUDA Kernel for the particle push
             if self.ionizer is not None:
                 # Ionizable species can have a charge that depends on the
@@ -831,7 +856,8 @@ class Particles(object) :
         # GPU (CUDA) version
         if self.use_cuda:
             # Get the threads per block and the blocks per grid
-            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+            dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+                self.Ntot, TPB=self.push_tpb )
             # Call the CUDA Kernel for push in x
             push_x_gpu[dim_grid_1d, dim_block_1d](
                 self.x, self.y, self.z,
@@ -1239,9 +1265,10 @@ class Particles(object) :
         # Shortcut for interpolation grids
         grid = fld.interp
         # Get the threads per block and the blocks per grid
-        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d( self.Ntot )
+        dim_grid_1d, dim_block_1d = cuda_tpb_bpg_1d(
+            self.Ntot, TPB=self.sort_tpb )
         dim_grid_2d_flat, dim_block_2d_flat = \
-                cuda_tpb_bpg_1d( self.prefix_sum.shape[0] )
+                cuda_tpb_bpg_1d( self.prefix_sum.shape[0], TPB=self.sort_tpb )
 
         # ------------------------
         # Sorting of the particles

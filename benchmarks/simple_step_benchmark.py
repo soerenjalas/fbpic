@@ -32,6 +32,10 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_COPY_TPBX"] = str(args.copy_tpbx)
     if args.copy_tpby is not None:
         os.environ["FBPIC_COPY_TPBY"] = str(args.copy_tpby)
+    if args.push_tpb is not None:
+        os.environ["FBPIC_PUSH_TPB"] = str(args.push_tpb)
+    if args.sort_tpb is not None:
+        os.environ["FBPIC_SORT_TPB"] = str(args.sort_tpb)
 
 
 def build_simulation(args):
@@ -136,6 +140,8 @@ def run_benchmark(args):
     if sim.use_cuda:
         print(f"deposit_tpb         : {os.environ.get('FBPIC_DEPOSIT_TPB', 'default')}")
         print(f"gather_tpb          : {os.environ.get('FBPIC_GATHER_TPB', 'default')}")
+        print(f"push_tpb            : {os.environ.get('FBPIC_PUSH_TPB', 'default')}")
+        print(f"sort_tpb            : {os.environ.get('FBPIC_SORT_TPB', 'default')}")
         print(f"copy_tpb            : ({os.environ.get('FBPIC_COPY_TPBX', 'default')}, {os.environ.get('FBPIC_COPY_TPBY', 'default')})")
     print(f"steps               : {args.steps}")
     print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
@@ -206,6 +212,10 @@ def parse_args():
                    help="override FBPIC_COPY_TPBX")
     p.add_argument("--copy-tpby", type=int, default=None,
                    help="override FBPIC_COPY_TPBY")
+    p.add_argument("--push-tpb", type=int, default=None,
+                   help="override FBPIC_PUSH_TPB")
+    p.add_argument("--sort-tpb", type=int, default=None,
+                   help="override FBPIC_SORT_TPB")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")
