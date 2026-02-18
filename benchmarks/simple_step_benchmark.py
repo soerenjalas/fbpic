@@ -281,7 +281,7 @@ def parse_args():
                    help="force-disable CUDA fastmath compilation")
     p.add_argument("--cuda-max-registers", type=int, default=None,
                    help="set max_registers for CUDA kernel compilation (experimental)")
-    p.add_argument("--deposition-backend", choices=["numba", "cupy_raw"], default=None,
+    p.add_argument("--deposition-backend", choices=["numba", "cupy_raw", "cubin"], default=None,
                    help="select GPU backend for supported deposition kernels")
     p.add_argument("--use-unsorted-rho-deposition", action="store_true",
                    help="force-enable unsorted atomic rho deposition on GPU")

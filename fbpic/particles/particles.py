@@ -51,8 +51,8 @@ if cuda_installed:
         deposit_rho_gpu_linear_one_mode, deposit_J_gpu_linear_one_mode, \
         deposit_rho_gpu_cubic_one_mode, deposit_J_gpu_cubic_one_mode
     from .deposition.raw_backend import \
-        launch_deposit_rho_gpu_unsorted_cubic_m3_raw, \
-        launch_deposit_J_gpu_unsorted_rel_cubic_m3_raw
+        launch_deposit_rho_gpu_unsorted_cubic_m3, \
+        launch_deposit_J_gpu_unsorted_rel_cubic_m3
     from .gathering.cuda_methods import gather_field_gpu_linear, \
         gather_field_gpu_cubic
     from .gathering.cuda_methods_one_mode import erase_eb_cuda, \
@@ -344,7 +344,7 @@ class Particles(object) :
                     unsorted_J_env.lower() in ('1', 'true', 'yes')
 
             backend_env = os.environ.get('FBPIC_DEPOSITION_BACKEND', 'numba').lower()
-            if backend_env in ('numba', 'cupy_raw'):
+            if backend_env in ('numba', 'cupy_raw', 'cubin'):
                 self.deposition_backend = backend_env
             else:
                 warnings.warn(
@@ -1178,8 +1178,9 @@ class Particles(object) :
                                 grid[1].d_ruyten_linear_coef,
                                 grid[2].d_ruyten_linear_coef)
                         else:
-                            if getattr(self, 'deposition_backend', 'numba') == 'cupy_raw':
-                                launch_deposit_rho_gpu_unsorted_cubic_m3_raw(
+                            backend = getattr(self, 'deposition_backend', 'numba')
+                            if backend in ('cupy_raw', 'cubin'):
+                                launch_deposit_rho_gpu_unsorted_cubic_m3(
                                     dim_grid_1d, dim_block_1d,
                                     self.x, self.y, self.z, weight, self.q,
                                     grid[0].invdz, grid[0].zmin, grid[0].Nz,
@@ -1187,7 +1188,8 @@ class Particles(object) :
                                     grid[0].rho, grid[1].rho, grid[2].rho,
                                     grid[0].d_ruyten_cubic_coef,
                                     grid[1].d_ruyten_cubic_coef,
-                                    grid[2].d_ruyten_cubic_coef)
+                                    grid[2].d_ruyten_cubic_coef,
+                                    backend=backend)
                             else:
                                 deposit_rho_gpu_unsorted_cubic_m3[
                                     dim_grid_1d, dim_block_1d](
@@ -1301,8 +1303,9 @@ class Particles(object) :
                                 grid[1].d_ruyten_linear_coef,
                                 grid[2].d_ruyten_linear_coef)
                         else:
-                            if getattr(self, 'deposition_backend', 'numba') == 'cupy_raw':
-                                launch_deposit_J_gpu_unsorted_rel_cubic_m3_raw(
+                            backend = getattr(self, 'deposition_backend', 'numba')
+                            if backend in ('cupy_raw', 'cubin'):
+                                launch_deposit_J_gpu_unsorted_rel_cubic_m3(
                                     dim_grid_1d, dim_block_1d,
                                     self.x, self.y, self.z, weight, self.q,
                                     self.ux, self.uy, self.uz, self.inv_gamma,
@@ -1313,7 +1316,8 @@ class Particles(object) :
                                     grid[2].Jr, grid[2].Jt, grid[2].Jz,
                                     grid[0].d_ruyten_cubic_coef,
                                     grid[1].d_ruyten_cubic_coef,
-                                    grid[2].d_ruyten_cubic_coef)
+                                    grid[2].d_ruyten_cubic_coef,
+                                    backend=backend)
                             else:
                                 deposit_J_gpu_unsorted_rel_cubic_m3[
                                     dim_grid_1d, dim_block_1d](

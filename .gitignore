@@ -1,5 +1,6 @@
 *.DS_Store
 tests/__pycache__
+fbpic/particles/deposition/kernels/*.cubin
 __pycache__/
 *.pyc
 

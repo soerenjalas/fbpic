@@ -281,7 +281,7 @@ def parse_args():
     p.add_argument("--n-order", type=int, default=-1)
     p.add_argument("--gamma-boost", type=float, default=10.0)
     p.add_argument("--particle-shape", choices=["linear", "cubic"], default="linear")
-    p.add_argument("--deposition-backend", choices=["numba", "cupy_raw"], default=None)
+    p.add_argument("--deposition-backend", choices=["numba", "cupy_raw", "cubin"], default=None)
     p.add_argument("--exchange-period", type=int, default=None)
     p.add_argument(
         "--disable-cupy-mempool-free",

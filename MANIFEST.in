@@ -1,3 +1,4 @@
 include README.md
 include requirements.txt
 include fbpic/particles/elementary_process/ionization/atomic_data.txt
+include fbpic/particles/deposition/kernels/deposition_nm3_raw.cu
