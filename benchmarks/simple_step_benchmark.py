@@ -26,6 +26,8 @@ def apply_kernel_env_overrides(args):
     """Apply optional CUDA kernel launch overrides via environment vars."""
     if args.use_unsorted_rho_deposition and args.disable_unsorted_rho_deposition:
         raise ValueError("Cannot set both --use-unsorted-rho-deposition and --disable-unsorted-rho-deposition")
+    if args.use_unsorted_j_deposition and args.disable_unsorted_j_deposition:
+        raise ValueError("Cannot set both --use-unsorted-j-deposition and --disable-unsorted-j-deposition")
 
     if args.deposit_tpb is not None:
         os.environ["FBPIC_DEPOSIT_TPB"] = str(args.deposit_tpb)
@@ -45,6 +47,10 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "1"
     if args.disable_unsorted_rho_deposition:
         os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "0"
+    if args.use_unsorted_j_deposition:
+        os.environ["FBPIC_USE_UNSORTED_J_DEPOSITION"] = "1"
+    if args.disable_unsorted_j_deposition:
+        os.environ["FBPIC_USE_UNSORTED_J_DEPOSITION"] = "0"
 
 
 def build_simulation(args):
@@ -155,6 +161,7 @@ def run_benchmark(args):
             print(f"push_tpb            : {getattr(p0, 'push_tpb', 'n/a')}")
             print(f"sort_tpb            : {getattr(p0, 'sort_tpb', 'n/a')}")
             print(f"unsorted_rho        : {getattr(p0, 'use_unsorted_rho_deposition', 'n/a')}")
+            print(f"unsorted_J          : {getattr(p0, 'use_unsorted_J_deposition', 'n/a')}")
         else:
             print("deposit_tpb         : n/a")
             print("gather_tpb          : n/a")
@@ -246,6 +253,10 @@ def parse_args():
                    help="force-enable unsorted atomic rho deposition on GPU")
     p.add_argument("--disable-unsorted-rho-deposition", action="store_true",
                    help="force-disable unsorted atomic rho deposition on GPU")
+    p.add_argument("--use-unsorted-j-deposition", action="store_true",
+                   help="force-enable unsorted atomic J deposition on GPU (experimental)")
+    p.add_argument("--disable-unsorted-j-deposition", action="store_true",
+                   help="force-disable unsorted atomic J deposition on GPU")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")

@@ -8,6 +8,7 @@ This file is part of the Fourier-Bessel Particle-In-Cell code (FB-PIC)
 from numba import cuda
 from fbpic.utils.cuda import compile_cupy
 import math
+from scipy.constants import c
 from fbpic.particles.deposition.particle_shapes import Sz_linear, \
     Sr_linear, Sz_cubic, Sr_cubic
 
@@ -310,6 +311,257 @@ def deposit_rho_gpu_unsorted_cubic(x, y, z, w, q,
 # -------------------------------
 # Field deposition - linear - J
 # -------------------------------
+
+@compile_cupy
+def deposit_J_gpu_unsorted_rel_linear(x, y, z, w, q,
+                        ux, uy, uz, inv_gamma,
+                        invdz, zmin, Nz,
+                        invdr, rmin, Nr,
+                        j_r_m, j_t_m, j_z_m, m,
+                        beta_n):
+    """
+    Unsorted deposition of current J (linear shape) for relativistic particles.
+
+    Parameters are similar to the sorted relativistic J deposition kernels.
+    """
+    # Get the 1D CUDA grid
+    i = cuda.grid(1)
+
+    if i < w.shape[0]:
+
+        # Sign for the shape factors
+        f = (-1)**m
+
+        # Position
+        xj = x[i]
+        yj = y[i]
+        zj = z[i]
+        # Relativistic momentum and inverse gamma
+        uxj = ux[i]
+        uyj = uy[i]
+        uzj = uz[i]
+        inv_gammaj = inv_gamma[i]
+        # Weights
+        wj = q * w[i]
+
+        # Cylindrical conversion
+        rj = math.sqrt(xj**2 + yj**2)
+        if (rj != 0.):
+            invr = 1./rj
+            cos = xj*invr  # Cosine
+            sin = yj*invr  # Sine
+        else:
+            cos = 1.
+            sin = 0.
+        # Calculate azimuthal factor
+        exptheta_m = 1. + 0.j
+        for _ in range(m):
+            exptheta_m *= (cos + 1.j*sin)
+
+        # Positions of the particles, in the cell unit
+        r_cell = invdr*(rj - rmin) - 0.5
+        z_cell = invdz*(zj - zmin) - 0.5
+
+        # Cell indices of the upper cell bounds
+        ir = min( int(math.ceil(r_cell)), Nr )
+        iz = int(math.ceil(z_cell))
+        # Handle periodic boundaries in z
+        if iz < 0:
+            iz += Nz
+        elif iz >= Nz:
+            iz -= Nz
+
+        # Calculate longitudinal indices at which to add charge
+        iz0 = iz - 1
+        iz1 = iz
+        if iz0 < 0:
+            iz0 += Nz
+        # Calculate radial indices at which to add charge
+        ir0 = ir - 1
+        ir1 = min( ir, Nr-1 )
+        if ir0 < 0:
+            ir0 = -(1 + ir0)
+
+        # Ruyten-corrected shape factor coefficient
+        bn = beta_n[ir]
+
+        # Calculate the currents
+        J_r_m_scal = wj * c * inv_gammaj * (cos*uxj + sin*uyj) * exptheta_m
+        J_t_m_scal = wj * c * inv_gammaj * (cos*uyj - sin*uxj) * exptheta_m
+        J_z_m_scal = wj * c * inv_gammaj * uzj * exptheta_m
+
+        J_t_m_00 = Sr_linear(r_cell, 0, -f, bn)*Sz_linear(z_cell, 0) * J_t_m_scal
+        J_r_m_00 = Sr_linear(r_cell, 0, -f, bn)*Sz_linear(z_cell, 0) * J_r_m_scal
+        J_z_m_00 = Sr_linear(r_cell, 0,  f, bn)*Sz_linear(z_cell, 0) * J_z_m_scal
+        J_r_m_01 = Sr_linear(r_cell, 0, -f, bn)*Sz_linear(z_cell, 1) * J_r_m_scal
+        J_t_m_01 = Sr_linear(r_cell, 0, -f, bn)*Sz_linear(z_cell, 1) * J_t_m_scal
+        J_z_m_01 = Sr_linear(r_cell, 0,  f, bn)*Sz_linear(z_cell, 1) * J_z_m_scal
+
+        J_r_m_10 = Sr_linear(r_cell, 1, -f, bn)*Sz_linear(z_cell, 0) * J_r_m_scal
+        J_t_m_10 = Sr_linear(r_cell, 1, -f, bn)*Sz_linear(z_cell, 0) * J_t_m_scal
+        J_z_m_10 = Sr_linear(r_cell, 1,  f, bn)*Sz_linear(z_cell, 0) * J_z_m_scal
+        J_r_m_11 = Sr_linear(r_cell, 1, -f, bn)*Sz_linear(z_cell, 1) * J_r_m_scal
+        J_t_m_11 = Sr_linear(r_cell, 1, -f, bn)*Sz_linear(z_cell, 1) * J_t_m_scal
+        J_z_m_11 = Sr_linear(r_cell, 1,  f, bn)*Sz_linear(z_cell, 1) * J_z_m_scal
+
+        # Atomically add the registers to global memory
+        cuda.atomic.add(j_r_m.real, (iz0, ir0), J_r_m_00.real)
+        cuda.atomic.add(j_r_m.real, (iz0, ir1), J_r_m_10.real)
+        cuda.atomic.add(j_r_m.real, (iz1, ir0), J_r_m_01.real)
+        cuda.atomic.add(j_r_m.real, (iz1, ir1), J_r_m_11.real)
+        if m > 0:
+            cuda.atomic.add(j_r_m.imag, (iz0, ir0), J_r_m_00.imag)
+            cuda.atomic.add(j_r_m.imag, (iz0, ir1), J_r_m_10.imag)
+            cuda.atomic.add(j_r_m.imag, (iz1, ir0), J_r_m_01.imag)
+            cuda.atomic.add(j_r_m.imag, (iz1, ir1), J_r_m_11.imag)
+
+        cuda.atomic.add(j_t_m.real, (iz0, ir0), J_t_m_00.real)
+        cuda.atomic.add(j_t_m.real, (iz0, ir1), J_t_m_10.real)
+        cuda.atomic.add(j_t_m.real, (iz1, ir0), J_t_m_01.real)
+        cuda.atomic.add(j_t_m.real, (iz1, ir1), J_t_m_11.real)
+        if m > 0:
+            cuda.atomic.add(j_t_m.imag, (iz0, ir0), J_t_m_00.imag)
+            cuda.atomic.add(j_t_m.imag, (iz0, ir1), J_t_m_10.imag)
+            cuda.atomic.add(j_t_m.imag, (iz1, ir0), J_t_m_01.imag)
+            cuda.atomic.add(j_t_m.imag, (iz1, ir1), J_t_m_11.imag)
+
+        cuda.atomic.add(j_z_m.real, (iz0, ir0), J_z_m_00.real)
+        cuda.atomic.add(j_z_m.real, (iz0, ir1), J_z_m_10.real)
+        cuda.atomic.add(j_z_m.real, (iz1, ir0), J_z_m_01.real)
+        cuda.atomic.add(j_z_m.real, (iz1, ir1), J_z_m_11.real)
+        if m > 0:
+            cuda.atomic.add(j_z_m.imag, (iz0, ir0), J_z_m_00.imag)
+            cuda.atomic.add(j_z_m.imag, (iz0, ir1), J_z_m_10.imag)
+            cuda.atomic.add(j_z_m.imag, (iz1, ir0), J_z_m_01.imag)
+            cuda.atomic.add(j_z_m.imag, (iz1, ir1), J_z_m_11.imag)
+
+
+@compile_cupy
+def deposit_J_gpu_unsorted_rel_cubic(x, y, z, w, q,
+                        ux, uy, uz, inv_gamma,
+                        invdz, zmin, Nz,
+                        invdr, rmin, Nr,
+                        j_r_m, j_t_m, j_z_m, m,
+                        beta_n):
+    """
+    Unsorted deposition of current J (cubic shape) for relativistic particles.
+    """
+    i = cuda.grid(1)
+
+    if i < w.shape[0]:
+        f = (-1)**m
+
+        # Position
+        xj = x[i]
+        yj = y[i]
+        zj = z[i]
+        # Relativistic momentum and inverse gamma
+        uxj = ux[i]
+        uyj = uy[i]
+        uzj = uz[i]
+        inv_gammaj = inv_gamma[i]
+        # Weights
+        wj = q * w[i]
+
+        # Cylindrical conversion
+        rj = math.sqrt(xj**2 + yj**2)
+        if (rj != 0.):
+            invr = 1./rj
+            cos = xj*invr
+            sin = yj*invr
+        else:
+            cos = 1.
+            sin = 0.
+
+        # Azimuthal factor
+        exptheta_m = 1. + 0.j
+        for _ in range(m):
+            exptheta_m *= (cos + 1.j*sin)
+
+        # Cell coordinates
+        r_cell = invdr*(rj - rmin) - 0.5
+        z_cell = invdz*(zj - zmin) - 0.5
+
+        # Cell indices of upper cell bounds
+        ir = min( int(math.ceil(r_cell)), Nr )
+        iz = int(math.ceil(z_cell))
+        if iz < 0:
+            iz += Nz
+        elif iz >= Nz:
+            iz -= Nz
+
+        # z indices
+        iz0 = iz - 2
+        iz1 = iz - 1
+        iz2 = iz
+        iz3 = iz + 1
+        if iz0 < 0:
+            iz0 += Nz
+        if iz1 < 0:
+            iz1 += Nz
+        if iz3 > Nz-1:
+            iz3 -= Nz
+
+        # r indices
+        ir0 = ir - 2
+        ir1 = min(ir - 1, Nr-1)
+        ir2 = min(ir    , Nr-1)
+        ir3 = min(ir + 1, Nr-1)
+        if ir0 < 0:
+            ir0 = -(1 + ir0)
+        if ir1 < 0:
+            ir1 = -(1 + ir1)
+
+        bn = beta_n[ir]
+
+        # Shape coefficients
+        Sz0 = Sz_cubic(z_cell, 0)
+        Sz1 = Sz_cubic(z_cell, 1)
+        Sz2 = Sz_cubic(z_cell, 2)
+        Sz3 = Sz_cubic(z_cell, 3)
+
+        Sr_r0 = Sr_cubic(r_cell, 0, -f, bn)
+        Sr_r1 = Sr_cubic(r_cell, 1, -f, bn)
+        Sr_r2 = Sr_cubic(r_cell, 2, -f, bn)
+        Sr_r3 = Sr_cubic(r_cell, 3, -f, bn)
+
+        Sr_z0 = Sr_cubic(r_cell, 0,  f, bn)
+        Sr_z1 = Sr_cubic(r_cell, 1,  f, bn)
+        Sr_z2 = Sr_cubic(r_cell, 2,  f, bn)
+        Sr_z3 = Sr_cubic(r_cell, 3,  f, bn)
+
+        # Current scalars
+        J_r_scal = wj * c * inv_gammaj * (cos*uxj + sin*uyj) * exptheta_m
+        J_t_scal = wj * c * inv_gammaj * (cos*uyj - sin*uxj) * exptheta_m
+        J_z_scal = wj * c * inv_gammaj * uzj * exptheta_m
+
+        # Explicit 16-point cubic stencil
+        iz_list = (iz0, iz1, iz2, iz3)
+        ir_list = (ir0, ir1, ir2, ir3)
+        Sz_list = (Sz0, Sz1, Sz2, Sz3)
+        Sr_r_list = (Sr_r0, Sr_r1, Sr_r2, Sr_r3)
+        Sr_z_list = (Sr_z0, Sr_z1, Sr_z2, Sr_z3)
+
+        for iz_i in range(4):
+            izp = iz_list[iz_i]
+            sz = Sz_list[iz_i]
+            for ir_i in range(4):
+                irp = ir_list[ir_i]
+                wr = Sr_r_list[ir_i] * sz
+                wz = Sr_z_list[ir_i] * sz
+
+                J_r = wr * J_r_scal
+                J_t = wr * J_t_scal
+                J_z = wz * J_z_scal
+
+                cuda.atomic.add(j_r_m.real, (izp, irp), J_r.real)
+                cuda.atomic.add(j_t_m.real, (izp, irp), J_t.real)
+                cuda.atomic.add(j_z_m.real, (izp, irp), J_z.real)
+                if m > 0:
+                    cuda.atomic.add(j_r_m.imag, (izp, irp), J_r.imag)
+                    cuda.atomic.add(j_t_m.imag, (izp, irp), J_t.imag)
+                    cuda.atomic.add(j_z_m.imag, (izp, irp), J_z.imag)
+
 
 @compile_cupy
 def deposit_J_gpu_unsorted(x, y, z, w, q,
