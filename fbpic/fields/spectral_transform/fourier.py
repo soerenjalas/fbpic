@@ -12,7 +12,8 @@ import numba
 from fbpic.utils.cuda import cuda_installed
 if cuda_installed:
     from fbpic.utils.cuda import cuda_tpb_bpg_2d, get_cuda_copy_tpb
-    from .cuda_methods import cuda_copy_2d_to_1d, cuda_copy_1d_to_2d
+    from .cuda_methods import cuda_copy_2d_to_1d, cuda_copy_1d_to_2d, \
+        cuda_copy_1d_to_2d_and_scale
     import cupy
     from cupy.cuda import cufft
 
@@ -149,15 +150,13 @@ class FFT(object):
             # Copy 2D arrays to 1D array for optimized 1D batch FFT
             cuda_copy_2d_to_1d[self.dim_grid, self.dim_block](
                 array_in, self.buffer1d_in)
-            # Perform forward FFT
+            # Perform inverse FFT
             self.fft.fft(self.buffer1d_in,
                          self.buffer1d_out,
                          cufft.CUFFT_INVERSE)
-            # Normalize inverse FFT
-            cupy.multiply(self.buffer1d_out, self.inv_Nz, out=self.buffer1d_out)
-            # Copy 1D arrays back to 2D array
-            cuda_copy_1d_to_2d[self.dim_grid, self.dim_block](
-                self.buffer1d_out, array_out)
+            # Copy 1D arrays back to 2D array and normalize in one kernel
+            cuda_copy_1d_to_2d_and_scale[self.dim_grid, self.dim_block](
+                self.buffer1d_out, array_out, self.inv_Nz)
         elif self.use_mkl:
             # Perform the inverse FFT on the CPU using MKL
             self.mklfft.inverse_transform( array_in, array_out )

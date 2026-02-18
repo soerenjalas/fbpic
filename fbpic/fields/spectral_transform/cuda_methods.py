@@ -112,6 +112,32 @@ def cuda_copy_1d_to_2d( array_1d, array_2d ) :
         i = iz + array_2d.shape[0]*ir
         array_2d[iz, ir] = array_1d[i]
 
+
+@compile_cupy
+def cuda_copy_1d_to_2d_and_scale( array_1d, array_2d, coef ) :
+    """
+    Copy array_1d to array_2d and multiply by a scalar coefficient.
+
+    Parameters :
+    ------------
+    array_2d : 2darray of complexs
+        Array of shape (Nz, Nr)
+
+    array_1d : 1d array of complexs
+        Array of shape (Nz*Nr,)
+
+    coef : float
+        Multiplicative coefficient applied during copy.
+    """
+
+    # Set up cuda grid
+    iz, ir = cuda.grid(2)
+
+    # Copy from array_1d to array_2d and scale
+    if (iz < array_2d.shape[0]) and (ir < array_2d.shape[1]) :
+        i = iz + array_2d.shape[0]*ir
+        array_2d[iz, ir] = coef * array_1d[i]
+
 # ----------------------------------------------------
 # Functions that combine components in spectral space
 # ----------------------------------------------------
