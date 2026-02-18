@@ -8,6 +8,7 @@ This benchmark is meant for steady-state performance checks:
 """
 
 import argparse
+import inspect
 import sys
 import time
 from pathlib import Path
@@ -71,24 +72,40 @@ def build_simulation(args):
     if not args.disable_galilean:
         v_comoving = -c * np.sqrt(1.0 - 1.0 / boost.gamma0**2)
 
-    sim = Simulation(
-        Nz=args.Nz,
-        zmax=args.zmax,
-        Nr=args.Nr,
-        rmax=args.rmax,
-        Nm=args.Nm,
-        dt=dt,
-        zmin=args.zmin,
-        v_comoving=v_comoving,
-        gamma_boost=boost.gamma0,
-        n_order=args.n_order,
-        use_cuda=args.use_cuda,
-        boundaries={"z": "open", "r": "reflective"},
-        exchange_period=args.exchange_period,
-        clear_cupy_mempool_on_exchange=(not args.disable_cupy_mempool_free),
-        particle_shape=args.particle_shape,
-        verbose_level=0,
-    )
+    # Build kwargs in a backward-compatible way: only pass arguments that
+    # exist in the currently checked-out FBPIC branch.
+    ctor_params = inspect.signature(Simulation.__init__).parameters
+
+    sim_kwargs = {
+        "Nz": args.Nz,
+        "zmax": args.zmax,
+        "Nr": args.Nr,
+        "rmax": args.rmax,
+        "Nm": args.Nm,
+        "dt": dt,
+    }
+
+    optional_kwargs = {
+        "zmin": args.zmin,
+        "v_comoving": v_comoving,
+        "gamma_boost": boost.gamma0,
+        "n_order": args.n_order,
+        "use_cuda": args.use_cuda,
+        "boundaries": {"z": "open", "r": "reflective"},
+        "exchange_period": args.exchange_period,
+        "clear_cupy_mempool_on_exchange": (not args.disable_cupy_mempool_free),
+        "particle_shape": args.particle_shape,
+        "verbose_level": 0,
+    }
+
+    for key, value in optional_kwargs.items():
+        if key in ctor_params and value is not None:
+            sim_kwargs[key] = value
+
+    if args.disable_cupy_mempool_free and "clear_cupy_mempool_on_exchange" not in ctor_params:
+        print("[bench] Note: current branch does not support clear_cupy_mempool_on_exchange; ignoring flag.")
+
+    sim = Simulation(**sim_kwargs)
 
     dens_func = make_density_profile(
         ramp_up=args.ramp_up,
