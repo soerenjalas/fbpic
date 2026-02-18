@@ -28,4 +28,6 @@ python benchmarks/simple_step_benchmark.py --use-cuda
 
 - If running from source (without `pip install -e .`), the script auto-adds repo root to `sys.path`.
 - The per-phase timings are coarse wrappers around high-level methods and are meant for trend tracking, not full profiling.
+- For cleaner profiler traces (without explicit synchronizations from the wrappers), use `--no-phase-breakdown`.
+- You can pass `--exchange-period` to test sensitivity to particle exchange frequency.
 - For detailed profiling, see `docs/source/advanced/profiling.rst`.

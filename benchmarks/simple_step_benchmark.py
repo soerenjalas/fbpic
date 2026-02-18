@@ -43,6 +43,7 @@ def build_simulation(args):
         p_nt=args.p_nt,
         n_e=args.n_e,
         n_order=args.n_order,
+        exchange_period=args.exchange_period,
         particle_shape=args.particle_shape,
         use_cuda=args.use_cuda,
         boundaries={"z": "periodic", "r": "reflective"},
@@ -106,7 +107,10 @@ def run_benchmark(args):
     if args.warmup_steps > 0:
         sim.step(args.warmup_steps, show_progress=False)
 
-    timings, calls = instrument(sim)
+    if args.no_phase_breakdown:
+        timings, calls = {}, {}
+    else:
+        timings, calls = instrument(sim)
 
     t0 = time.perf_counter()
     sim.step(args.steps, show_progress=False)
@@ -123,6 +127,9 @@ def run_benchmark(args):
     if n_particles > 0:
         pps = (n_particles * args.steps) / total
         print(f"particle-updates/s  : {pps:.3e}")
+
+    if args.no_phase_breakdown:
+        return
 
     print("\n--- Phase breakdown (coarse) ---")
     ordered_keys = [
@@ -167,8 +174,12 @@ def parse_args():
     p.add_argument("--plasma-rmax", type=float, default=None)
 
     p.add_argument("--n-order", type=int, default=16)
+    p.add_argument("--exchange-period", type=int, default=None,
+                   help="particle exchange period passed to Simulation")
     p.add_argument("--particle-shape", choices=["linear", "cubic"], default="linear")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
+    p.add_argument("--no-phase-breakdown", action="store_true",
+                   help="disable wrapped per-phase timing (useful for cleaner nsys traces)")
 
     return p.parse_args()
 
