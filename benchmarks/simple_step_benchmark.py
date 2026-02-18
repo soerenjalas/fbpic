@@ -55,6 +55,8 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_CUDA_FASTMATH"] = "0"
     if args.cuda_max_registers is not None:
         os.environ["FBPIC_CUDA_MAX_REGISTERS"] = str(args.cuda_max_registers)
+    if args.deposition_backend is not None:
+        os.environ["FBPIC_DEPOSITION_BACKEND"] = args.deposition_backend
     if args.use_unsorted_rho_deposition:
         os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "1"
     if args.disable_unsorted_rho_deposition:
@@ -177,11 +179,13 @@ def run_benchmark(args):
             print(f"sort_tpb            : {getattr(p0, 'sort_tpb', 'n/a')}")
             print(f"unsorted_rho        : {getattr(p0, 'use_unsorted_rho_deposition', 'n/a')}")
             print(f"unsorted_J          : {getattr(p0, 'use_unsorted_J_deposition', 'n/a')}")
+            print(f"deposition_backend  : {getattr(p0, 'deposition_backend', 'n/a')}")
         else:
             print("deposit_tpb         : n/a")
             print("gather_tpb          : n/a")
             print("push_tpb            : n/a")
             print("sort_tpb            : n/a")
+            print("deposition_backend  : n/a")
 
         # The copy kernels are configured in both FFT and DHT transforms
         fft_copy_tpb = getattr(sim.fld.trans[0].fft, 'dim_block', 'n/a')
@@ -277,6 +281,8 @@ def parse_args():
                    help="force-disable CUDA fastmath compilation")
     p.add_argument("--cuda-max-registers", type=int, default=None,
                    help="set max_registers for CUDA kernel compilation (experimental)")
+    p.add_argument("--deposition-backend", choices=["numba", "cupy_raw"], default=None,
+                   help="select GPU backend for supported deposition kernels")
     p.add_argument("--use-unsorted-rho-deposition", action="store_true",
                    help="force-enable unsorted atomic rho deposition on GPU")
     p.add_argument("--disable-unsorted-rho-deposition", action="store_true",

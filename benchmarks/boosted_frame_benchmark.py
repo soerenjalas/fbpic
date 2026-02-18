@@ -9,6 +9,7 @@ This benchmark is meant for steady-state performance checks:
 
 import argparse
 import inspect
+import os
 import sys
 import time
 from pathlib import Path
@@ -211,6 +212,9 @@ def get_original_default_steps(args, dt):
 
 
 def run_benchmark(args):
+    if args.deposition_backend is not None:
+        os.environ["FBPIC_DEPOSITION_BACKEND"] = args.deposition_backend
+
     sim = build_simulation(args)
     sync = make_gpu_sync(sim)
 
@@ -236,6 +240,8 @@ def run_benchmark(args):
     print(f"timed_steps         : {timed_steps}")
     print(f"grid (Nz, Nr, Nm)   : ({args.Nz}, {args.Nr}, {args.Nm})")
     print(f"particle_shape      : {args.particle_shape}")
+    if len(sim.ptcl) > 0:
+        print(f"deposition_backend  : {getattr(sim.ptcl[0], 'deposition_backend', 'n/a')}")
     print(f"particles (total)   : {n_particles}")
     print(f"timed runtime [s]   : {elapsed:.6f}")
     print(f"time / step [s]     : {elapsed / timed_steps:.6f}")
@@ -275,6 +281,7 @@ def parse_args():
     p.add_argument("--n-order", type=int, default=-1)
     p.add_argument("--gamma-boost", type=float, default=10.0)
     p.add_argument("--particle-shape", choices=["linear", "cubic"], default="linear")
+    p.add_argument("--deposition-backend", choices=["numba", "cupy_raw"], default=None)
     p.add_argument("--exchange-period", type=int, default=None)
     p.add_argument(
         "--disable-cupy-mempool-free",

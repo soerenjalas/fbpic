@@ -50,6 +50,8 @@ if cuda_installed:
     from .deposition.cuda_methods_one_mode import \
         deposit_rho_gpu_linear_one_mode, deposit_J_gpu_linear_one_mode, \
         deposit_rho_gpu_cubic_one_mode, deposit_J_gpu_cubic_one_mode
+    from .deposition.raw_backend import \
+        launch_deposit_J_gpu_unsorted_rel_cubic_m3_raw
     from .gathering.cuda_methods import gather_field_gpu_linear, \
         gather_field_gpu_cubic
     from .gathering.cuda_methods_one_mode import erase_eb_cuda, \
@@ -339,6 +341,15 @@ class Particles(object) :
             else:
                 self.use_unsorted_J_deposition = \
                     unsorted_J_env.lower() in ('1', 'true', 'yes')
+
+            backend_env = os.environ.get('FBPIC_DEPOSITION_BACKEND', 'numba').lower()
+            if backend_env in ('numba', 'cupy_raw'):
+                self.deposition_backend = backend_env
+            else:
+                warnings.warn(
+                    f"Ignoring invalid FBPIC_DEPOSITION_BACKEND={backend_env!r}; using 'numba'"
+                )
+                self.deposition_backend = 'numba'
 
 
     def send_particles_to_gpu( self ):
@@ -1278,18 +1289,32 @@ class Particles(object) :
                                 grid[1].d_ruyten_linear_coef,
                                 grid[2].d_ruyten_linear_coef)
                         else:
-                            deposit_J_gpu_unsorted_rel_cubic_m3[
-                                dim_grid_1d, dim_block_1d](
-                                self.x, self.y, self.z, weight, self.q,
-                                self.ux, self.uy, self.uz, self.inv_gamma,
-                                grid[0].invdz, grid[0].zmin, grid[0].Nz,
-                                grid[0].invdr, grid[0].rmin, grid[0].Nr,
-                                grid[0].Jr, grid[0].Jt, grid[0].Jz,
-                                grid[1].Jr, grid[1].Jt, grid[1].Jz,
-                                grid[2].Jr, grid[2].Jt, grid[2].Jz,
-                                grid[0].d_ruyten_cubic_coef,
-                                grid[1].d_ruyten_cubic_coef,
-                                grid[2].d_ruyten_cubic_coef)
+                            if getattr(self, 'deposition_backend', 'numba') == 'cupy_raw':
+                                launch_deposit_J_gpu_unsorted_rel_cubic_m3_raw(
+                                    dim_grid_1d, dim_block_1d,
+                                    self.x, self.y, self.z, weight, self.q,
+                                    self.ux, self.uy, self.uz, self.inv_gamma,
+                                    grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                    grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                    grid[0].Jr, grid[0].Jt, grid[0].Jz,
+                                    grid[1].Jr, grid[1].Jt, grid[1].Jz,
+                                    grid[2].Jr, grid[2].Jt, grid[2].Jz,
+                                    grid[0].d_ruyten_cubic_coef,
+                                    grid[1].d_ruyten_cubic_coef,
+                                    grid[2].d_ruyten_cubic_coef)
+                            else:
+                                deposit_J_gpu_unsorted_rel_cubic_m3[
+                                    dim_grid_1d, dim_block_1d](
+                                    self.x, self.y, self.z, weight, self.q,
+                                    self.ux, self.uy, self.uz, self.inv_gamma,
+                                    grid[0].invdz, grid[0].zmin, grid[0].Nz,
+                                    grid[0].invdr, grid[0].rmin, grid[0].Nr,
+                                    grid[0].Jr, grid[0].Jt, grid[0].Jz,
+                                    grid[1].Jr, grid[1].Jt, grid[1].Jz,
+                                    grid[2].Jr, grid[2].Jt, grid[2].Jz,
+                                    grid[0].d_ruyten_cubic_coef,
+                                    grid[1].d_ruyten_cubic_coef,
+                                    grid[2].d_ruyten_cubic_coef)
                     else:
                         for m in range(Nm):
                             if self.particle_shape == 'linear':

@@ -49,6 +49,8 @@ python benchmarks/simple_step_benchmark.py --use-cuda
     (force on/off for GPU unsorted rho deposition; default is on)
   - `--use-unsorted-j-deposition` / `--disable-unsorted-j-deposition`
     (force on/off for GPU unsorted J deposition; default is on)
+  - `--deposition-backend {numba,cupy_raw}`
+    (A/B test experimental CuPy RawKernel backend for supported deposition kernels)
 - Current built-in GPU defaults are architecture-aware (including A100),
   and overrides are useful for cluster-specific retuning.
 - For `Nm=2` and `Nm=3`, the unsorted deposition path includes fused
@@ -77,6 +79,15 @@ python benchmarks/boosted_frame_benchmark.py \
   --warmup-steps 5
 ```
 
+### Run (GPU, RawKernel deposition experiment)
+
+```bash
+python benchmarks/boosted_frame_benchmark.py \
+  --Nm 3 --particle-shape cubic \
+  --warmup-steps 5 \
+  --deposition-backend cupy_raw
+```
+
 ### Notes
 
 - Running with no args now matches the defaults from
@@ -86,4 +97,4 @@ python benchmarks/boosted_frame_benchmark.py \
   boosted-frame `N_step` expression.
 - Warmup is excluded from timed runtime.
 - You can still control kernel behavior with environment variables (e.g.
-  `FBPIC_USE_UNSORTED_J_DEPOSITION`) before launching the script.
+  `FBPIC_USE_UNSORTED_J_DEPOSITION`, `FBPIC_DEPOSITION_BACKEND`) before launching the script.
