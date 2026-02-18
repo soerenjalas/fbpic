@@ -5,6 +5,7 @@
 This file is part of the Fourier-Bessel Particle-In-Cell code (FB-PIC)
 It defines the structure and methods associated with the particles.
 """
+import os
 import warnings
 import numpy as np
 from scipy.constants import e
@@ -246,14 +247,35 @@ class Particles(object) :
             self.prefix_sum_shift = 0
             # Register boolean that records if the particles are sorted or not
             self.sorted = False
-            # Define optimal number of CUDA threads per block for deposition
-            # and gathering kernels (determined empirically)
+            # Define number of CUDA threads per block for deposition
+            # and gathering kernels (can be overridden via environment)
             if particle_shape == "cubic":
                 self.deposit_tpb = 32
                 self.gather_tpb = 256
             else:
-                self.deposit_tpb = 16 if cuda_gpu_model == "V100" else 8
+                self.deposit_tpb = 16 if cuda_gpu_model in ("V100", "A100") else 8
                 self.gather_tpb = 128
+
+            deposit_tpb_env = os.environ.get('FBPIC_DEPOSIT_TPB')
+            gather_tpb_env = os.environ.get('FBPIC_GATHER_TPB')
+            if deposit_tpb_env is not None:
+                try:
+                    deposit_tpb = int(deposit_tpb_env)
+                    if deposit_tpb > 0:
+                        self.deposit_tpb = deposit_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_DEPOSIT_TPB={deposit_tpb_env!r}"
+                    )
+            if gather_tpb_env is not None:
+                try:
+                    gather_tpb = int(gather_tpb_env)
+                    if gather_tpb > 0:
+                        self.gather_tpb = gather_tpb
+                except ValueError:
+                    warnings.warn(
+                        f"Ignoring invalid FBPIC_GATHER_TPB={gather_tpb_env!r}"
+                    )
 
     def send_particles_to_gpu( self ):
         """

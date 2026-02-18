@@ -11,7 +11,7 @@ import numba
 # Check if CUDA is available, then import CUDA functions
 from fbpic.utils.cuda import cuda_installed
 if cuda_installed:
-    from fbpic.utils.cuda import cuda_tpb_bpg_2d, cuda_gpu_model
+    from fbpic.utils.cuda import cuda_tpb_bpg_2d, get_cuda_copy_tpb
     from .cuda_methods import cuda_copy_2d_to_1d, cuda_copy_1d_to_2d
     import cupy
     from cupy.cuda import cufft
@@ -64,9 +64,9 @@ class FFT(object):
 
         # Initialize the object for calculation on the GPU
         if self.use_cuda:
-            # Set optimal number of CUDA threads per block
-            # for copy 1d/2d kernels (determined empirically)
-            copy_tpb = (8,32) if cuda_gpu_model == "V100" else (2,16)
+            # Set number of CUDA threads per block for copy 1d/2d kernels
+            # (can be overridden via FBPIC_COPY_TPBX/FBPIC_COPY_TPBY)
+            copy_tpb = get_cuda_copy_tpb(default_v100=(8,32), default_other=(2,16))
             # Initialize the dimension of the grid and blocks
             self.dim_grid, self.dim_block = cuda_tpb_bpg_2d(Nz, Nr, *copy_tpb)
             # Initialize 1d buffer for cufft

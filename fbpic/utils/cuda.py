@@ -5,6 +5,7 @@
 This file is part of the Fourier-Bessel Particle-In-Cell code (FB-PIC)
 It defines a set of generic functions that operate on a GPU.
 """
+import os
 import warnings
 import numba
 numba_version = (int(numba.__version__.split('.')[0]),
@@ -26,7 +27,7 @@ if numba_cuda_installed:
     elif "V100" in str(cuda.gpus[0]._device.name):
         cuda_gpu_model = "V100"
     elif "A100" in str(cuda.gpus[0]._device.name):
-        cuda_gpu_model = "V100" # force to V100
+        cuda_gpu_model = "A100"
     else:
         cuda_gpu_model = "other"
 
@@ -71,8 +72,8 @@ def cuda_tpb_bpg_1d(x, TPB = 256):
     TPB : int
         Threads per block.
     """
-    # Calculates the needed blocks per grid
-    BPG = int(x/TPB + 1)
+    # Calculates the needed blocks per grid (ceil division)
+    BPG = (x + TPB - 1) // TPB
     return BPG, TPB
 
 def cuda_tpb_bpg_2d(x, y, TPBx = 1, TPBy = 128):
@@ -95,10 +96,50 @@ def cuda_tpb_bpg_2d(x, y, TPBx = 1, TPBy = 128):
     (TPBx, TPBy) : tuple of ints
         Threads per block in x and y.
     """
-    # Calculates the needed blocks per grid
-    BPGx = int(x/TPBx + 1)
-    BPGy = int(y/TPBy + 1)
+    # Calculates the needed blocks per grid (ceil division)
+    BPGx = (x + TPBx - 1) // TPBx
+    BPGy = (y + TPBy - 1) // TPBy
     return (BPGx, BPGy), (TPBx, TPBy)
+
+
+def _read_positive_int_env(var_name):
+    """Read a positive integer from environment, or return None."""
+    value = os.environ.get(var_name)
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        warnings.warn(
+            f"Ignoring invalid value for {var_name}: {value!r} (expected integer)."
+        )
+        return None
+    if parsed <= 0:
+        warnings.warn(
+            f"Ignoring invalid value for {var_name}: {value!r} (expected > 0)."
+        )
+        return None
+    return parsed
+
+
+def get_cuda_copy_tpb(default_v100=(8, 32), default_other=(2, 16)):
+    """
+    Return CUDA threads-per-block tuple for copy kernels.
+
+    This can be overridden via environment variables:
+    - FBPIC_COPY_TPBX
+    - FBPIC_COPY_TPBY
+    """
+    tpbx = _read_positive_int_env('FBPIC_COPY_TPBX')
+    tpby = _read_positive_int_env('FBPIC_COPY_TPBY')
+    if (tpbx is not None) and (tpby is not None):
+        return (tpbx, tpby)
+
+    if cuda_gpu_model in ("V100", "A100"):
+        return default_v100
+    else:
+        return default_other
+
 
 # -----------------------------------------------------
 # CUDA memory management

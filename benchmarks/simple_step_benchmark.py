@@ -6,6 +6,7 @@ then times a sequence of PIC steps and reports a coarse per-phase breakdown.
 """
 
 import argparse
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -19,6 +20,18 @@ if str(REPO_ROOT) not in sys.path:
 from scipy.constants import c
 
 from fbpic.main import Simulation
+
+
+def apply_kernel_env_overrides(args):
+    """Apply optional CUDA kernel launch overrides via environment vars."""
+    if args.deposit_tpb is not None:
+        os.environ["FBPIC_DEPOSIT_TPB"] = str(args.deposit_tpb)
+    if args.gather_tpb is not None:
+        os.environ["FBPIC_GATHER_TPB"] = str(args.gather_tpb)
+    if args.copy_tpbx is not None:
+        os.environ["FBPIC_COPY_TPBX"] = str(args.copy_tpbx)
+    if args.copy_tpby is not None:
+        os.environ["FBPIC_COPY_TPBY"] = str(args.copy_tpby)
 
 
 def build_simulation(args):
@@ -99,6 +112,7 @@ def instrument(sim):
 
 
 def run_benchmark(args):
+    apply_kernel_env_overrides(args)
     sim = build_simulation(args)
 
     n_particles = sum(species.Ntot for species in sim.ptcl)
@@ -119,6 +133,10 @@ def run_benchmark(args):
 
     print("=== FBPIC Simple Step Benchmark ===")
     print(f"backend             : {'GPU' if sim.use_cuda else 'CPU'}")
+    if sim.use_cuda:
+        print(f"deposit_tpb         : {os.environ.get('FBPIC_DEPOSIT_TPB', 'default')}")
+        print(f"gather_tpb          : {os.environ.get('FBPIC_GATHER_TPB', 'default')}")
+        print(f"copy_tpb            : ({os.environ.get('FBPIC_COPY_TPBX', 'default')}, {os.environ.get('FBPIC_COPY_TPBY', 'default')})")
     print(f"steps               : {args.steps}")
     print(f"grid (Nz, Nr, Nm)   : ({sim.fld.Nz}, {sim.fld.Nr}, {sim.fld.Nm})")
     print(f"particles (total)   : {n_particles}")
@@ -180,6 +198,14 @@ def parse_args():
     p.add_argument("--particle-shape", choices=["linear", "cubic"], default="linear")
     p.add_argument("--disable-cupy-mempool-free", action="store_true",
                    help="disable CuPy memory-pool free_all_blocks after particle exchange")
+    p.add_argument("--deposit-tpb", type=int, default=None,
+                   help="override FBPIC_DEPOSIT_TPB")
+    p.add_argument("--gather-tpb", type=int, default=None,
+                   help="override FBPIC_GATHER_TPB")
+    p.add_argument("--copy-tpbx", type=int, default=None,
+                   help="override FBPIC_COPY_TPBX")
+    p.add_argument("--copy-tpby", type=int, default=None,
+                   help="override FBPIC_COPY_TPBY")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")

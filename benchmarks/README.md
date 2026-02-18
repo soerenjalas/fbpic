@@ -32,4 +32,8 @@ python benchmarks/simple_step_benchmark.py --use-cuda
 - You can pass `--exchange-period` to test sensitivity to particle exchange frequency.
 - You can pass `--disable-cupy-mempool-free` to test impact of skipping
   `cupy.get_default_memory_pool().free_all_blocks()` after particle exchange.
+- You can override selected CUDA launch parameters for tuning:
+  - `--deposit-tpb` (particle deposition)
+  - `--gather-tpb` (particle gathering)
+  - `--copy-tpbx/--copy-tpby` (spectral copy kernels)
 - For detailed profiling, see `docs/source/advanced/profiling.rst`.
