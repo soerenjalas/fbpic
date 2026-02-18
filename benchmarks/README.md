@@ -30,4 +30,6 @@ python benchmarks/simple_step_benchmark.py --use-cuda
 - The per-phase timings are coarse wrappers around high-level methods and are meant for trend tracking, not full profiling.
 - For cleaner profiler traces (without explicit synchronizations from the wrappers), use `--no-phase-breakdown`.
 - You can pass `--exchange-period` to test sensitivity to particle exchange frequency.
+- You can pass `--disable-cupy-mempool-free` to test impact of skipping
+  `cupy.get_default_memory_pool().free_all_blocks()` after particle exchange.
 - For detailed profiling, see `docs/source/advanced/profiling.rst`.

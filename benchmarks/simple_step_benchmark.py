@@ -44,6 +44,7 @@ def build_simulation(args):
         n_e=args.n_e,
         n_order=args.n_order,
         exchange_period=args.exchange_period,
+        clear_cupy_mempool_on_exchange=(not args.disable_cupy_mempool_free),
         particle_shape=args.particle_shape,
         use_cuda=args.use_cuda,
         boundaries={"z": "periodic", "r": "reflective"},
@@ -177,6 +178,8 @@ def parse_args():
     p.add_argument("--exchange-period", type=int, default=None,
                    help="particle exchange period passed to Simulation")
     p.add_argument("--particle-shape", choices=["linear", "cubic"], default="linear")
+    p.add_argument("--disable-cupy-mempool-free", action="store_true",
+                   help="disable CuPy memory-pool free_all_blocks after particle exchange")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")
