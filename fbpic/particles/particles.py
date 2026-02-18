@@ -341,6 +341,22 @@ class Particles(object) :
                 self.use_unsorted_J_deposition = \
                     unsorted_J_env.lower() in ('1', 'true', 'yes')
 
+            # Fused unsorted Nm=3 kernels are enabled by default.
+            # These can be disabled for A/B tests.
+            fused_nm3_rho_env = os.environ.get('FBPIC_USE_FUSED_UNSORTED_NM3_RHO')
+            if fused_nm3_rho_env is None:
+                self.use_fused_unsorted_nm3_rho = True
+            else:
+                self.use_fused_unsorted_nm3_rho = \
+                    fused_nm3_rho_env.lower() in ('1', 'true', 'yes')
+
+            fused_nm3_J_env = os.environ.get('FBPIC_USE_FUSED_UNSORTED_NM3_J')
+            if fused_nm3_J_env is None:
+                self.use_fused_unsorted_nm3_J = True
+            else:
+                self.use_fused_unsorted_nm3_J = \
+                    fused_nm3_J_env.lower() in ('1', 'true', 'yes')
+
             # Experimental: fused cubic Nm=3 J deposition over sorted cells.
             # This path accumulates per-cell contributions before atomics.
             supercell_J_env = os.environ.get('FBPIC_USE_SUPERCELL_J_DEPOSITION')
@@ -1171,7 +1187,7 @@ class Particles(object) :
                                 grid[0].rho, grid[1].rho,
                                 grid[0].d_ruyten_cubic_coef,
                                 grid[1].d_ruyten_cubic_coef)
-                    elif Nm == 3:
+                    elif Nm == 3 and self.use_fused_unsorted_nm3_rho:
                         if self.particle_shape == 'linear':
                             deposit_rho_gpu_unsorted_linear_m3[
                                 dim_grid_1d, dim_block_1d](
@@ -1304,7 +1320,7 @@ class Particles(object) :
                                 grid[1].Jr, grid[1].Jt, grid[1].Jz,
                                 grid[0].d_ruyten_cubic_coef,
                                 grid[1].d_ruyten_cubic_coef)
-                    elif Nm == 3:
+                    elif Nm == 3 and self.use_fused_unsorted_nm3_J:
                         if self.particle_shape == 'linear':
                             deposit_J_gpu_unsorted_rel_linear_m3[
                                 dim_grid_1d, dim_block_1d](
