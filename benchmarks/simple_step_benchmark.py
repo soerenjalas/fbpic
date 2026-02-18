@@ -24,6 +24,9 @@ from fbpic.main import Simulation
 
 def apply_kernel_env_overrides(args):
     """Apply optional CUDA kernel launch overrides via environment vars."""
+    if args.use_unsorted_rho_deposition and args.disable_unsorted_rho_deposition:
+        raise ValueError("Cannot set both --use-unsorted-rho-deposition and --disable-unsorted-rho-deposition")
+
     if args.deposit_tpb is not None:
         os.environ["FBPIC_DEPOSIT_TPB"] = str(args.deposit_tpb)
     if args.gather_tpb is not None:
@@ -40,6 +43,8 @@ def apply_kernel_env_overrides(args):
         os.environ["FBPIC_FFT_FUSE_IFFT_SCALE"] = "0"
     if args.use_unsorted_rho_deposition:
         os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "1"
+    if args.disable_unsorted_rho_deposition:
+        os.environ["FBPIC_USE_UNSORTED_RHO_DEPOSITION"] = "0"
 
 
 def build_simulation(args):
@@ -238,7 +243,9 @@ def parse_args():
     p.add_argument("--disable-fused-ifft-scale", action="store_true",
                    help="disable fused iFFT normalization+copy kernel on GPU")
     p.add_argument("--use-unsorted-rho-deposition", action="store_true",
-                   help="use unsorted atomic rho deposition on GPU (experimental, linear/cubic)")
+                   help="force-enable unsorted atomic rho deposition on GPU")
+    p.add_argument("--disable-unsorted-rho-deposition", action="store_true",
+                   help="force-disable unsorted atomic rho deposition on GPU")
     p.add_argument("--use-cuda", action="store_true", help="run benchmark on GPU")
     p.add_argument("--no-phase-breakdown", action="store_true",
                    help="disable wrapped per-phase timing (useful for cleaner nsys traces)")
