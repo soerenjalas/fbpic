@@ -325,10 +325,16 @@ class Particles(object) :
                 self.use_unsorted_rho_deposition = \
                     unsorted_rho_env.lower() in ('1', 'true', 'yes')
 
-            # Experimental: use atomic unsorted J deposition on GPU.
-            # Default is off because performance depends on setup.
-            self.use_unsorted_J_deposition = os.environ.get(
-                'FBPIC_USE_UNSORTED_J_DEPOSITION', '0').lower() in ('1', 'true', 'yes')
+            # Use atomic unsorted J deposition on GPU to avoid an
+            # additional full particle sort before J deposition.
+            # (implemented for linear and cubic particle shapes)
+            unsorted_J_env = os.environ.get('FBPIC_USE_UNSORTED_J_DEPOSITION')
+            if unsorted_J_env is None:
+                # Default on for GPU (can be disabled via env var)
+                self.use_unsorted_J_deposition = True
+            else:
+                self.use_unsorted_J_deposition = \
+                    unsorted_J_env.lower() in ('1', 'true', 'yes')
 
     def send_particles_to_gpu( self ):
         """
