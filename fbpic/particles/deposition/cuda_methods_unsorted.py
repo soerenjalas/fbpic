@@ -1115,25 +1115,66 @@ def deposit_rho_gpu_unsorted_cubic_m3(x, y, z, w, q,
         bn1 = beta_n_m1[ir]
         bn2 = beta_n_m2[ir]
 
-        Sz = (
-            Sz_cubic(z_cell, 0), Sz_cubic(z_cell, 1),
-            Sz_cubic(z_cell, 2), Sz_cubic(z_cell, 3)
-        )
+        # Cubic longitudinal weights (compute once, avoid repeated device calls)
+        iz_shape = int(math.ceil(z_cell)) - 2
+        uz = z_cell - iz_shape - 1.
+        tz = 1. - uz
+        uz2 = uz * uz
+        uz3 = uz2 * uz
+        tz2 = tz * tz
+        tz3 = tz2 * tz
+        sz0 = (1./6.) * tz3
+        sz1 = (1./6.) * (3.*uz3 - 6.*uz2 + 4.)
+        sz2 = (1./6.) * (3.*tz3 - 6.*tz2 + 4.)
+        sz3 = (1./6.) * uz3
+        Sz = (sz0, sz1, sz2, sz3)
+
+        # Cubic radial base weights (without axis flip sign)
+        ir_shape = int(math.ceil(r_cell)) - 2
+        ur = r_cell - ir_shape - 1.
+        tr = 1. - ur
+        ur2 = ur * ur
+        ur3 = ur2 * ur
+        tr2 = tr * tr
+        tr3 = tr2 * tr
+        srb0 = (1./6.) * tr3
+        srb1 = (1./6.) * (3.*ur3 - 6.*ur2 + 4.)
+        srb2 = (1./6.) * (3.*tr3 - 6.*tr2 + 4.)
+        srb3 = (1./6.) * ur3
+        corr = tr * ur
+
+        # m=0 (flip sign +1 => no axis-sign change)
+        sr00 = srb0
+        sr01 = srb1 + bn0 * corr
+        sr02 = srb2 - bn0 * corr
+        sr03 = srb3
+
+        # m=1 (flip sign -1 => axis-sign change where needed)
+        sr10 = srb0
+        sr11 = srb1 + bn1 * corr
+        sr12 = srb2 - bn1 * corr
+        sr13 = srb3
+        if ir_shape < 0:
+            sr10 = -sr10
+        if ir_shape + 1 < 0:
+            sr11 = -sr11
+        if ir_shape + 2 < 0:
+            sr12 = -sr12
+        if ir_shape + 3 < 0:
+            sr13 = -sr13
+
+        # m=2 (flip sign +1 => no axis-sign change)
+        sr20 = srb0
+        sr21 = srb1 + bn2 * corr
+        sr22 = srb2 - bn2 * corr
+        sr23 = srb3
+
         izs = (iz0, iz1, iz2, iz3)
         irs = (ir0, ir1, ir2, ir3)
 
-        Sr0 = (
-            Sr_cubic(r_cell, 0,  1, bn0), Sr_cubic(r_cell, 1,  1, bn0),
-            Sr_cubic(r_cell, 2,  1, bn0), Sr_cubic(r_cell, 3,  1, bn0)
-        )
-        Sr1 = (
-            Sr_cubic(r_cell, 0, -1, bn1), Sr_cubic(r_cell, 1, -1, bn1),
-            Sr_cubic(r_cell, 2, -1, bn1), Sr_cubic(r_cell, 3, -1, bn1)
-        )
-        Sr2 = (
-            Sr_cubic(r_cell, 0,  1, bn2), Sr_cubic(r_cell, 1,  1, bn2),
-            Sr_cubic(r_cell, 2,  1, bn2), Sr_cubic(r_cell, 3,  1, bn2)
-        )
+        Sr0 = (sr00, sr01, sr02, sr03)
+        Sr1 = (sr10, sr11, sr12, sr13)
+        Sr2 = (sr20, sr21, sr22, sr23)
 
         R0 = wj
         R1_r = wj * cos
@@ -1357,39 +1398,82 @@ def deposit_J_gpu_unsorted_rel_cubic_m3(x, y, z, w, q,
         bn1 = beta_n_m1[ir]
         bn2 = beta_n_m2[ir]
 
-        Sz = (
-            Sz_cubic(z_cell, 0), Sz_cubic(z_cell, 1),
-            Sz_cubic(z_cell, 2), Sz_cubic(z_cell, 3)
-        )
+        # Cubic longitudinal weights (compute once, avoid repeated device calls)
+        iz_shape = int(math.ceil(z_cell)) - 2
+        uz = z_cell - iz_shape - 1.
+        tz = 1. - uz
+        uz2 = uz * uz
+        uz3 = uz2 * uz
+        tz2 = tz * tz
+        tz3 = tz2 * tz
+        sz0 = (1./6.) * tz3
+        sz1 = (1./6.) * (3.*uz3 - 6.*uz2 + 4.)
+        sz2 = (1./6.) * (3.*tz3 - 6.*tz2 + 4.)
+        sz3 = (1./6.) * uz3
+        Sz = (sz0, sz1, sz2, sz3)
+
+        # Cubic radial base weights (without axis flip sign)
+        ir_shape = int(math.ceil(r_cell)) - 2
+        ur = r_cell - ir_shape - 1.
+        tr = 1. - ur
+        ur2 = ur * ur
+        ur3 = ur2 * ur
+        tr2 = tr * tr
+        tr3 = tr2 * tr
+        srb0 = (1./6.) * tr3
+        srb1 = (1./6.) * (3.*ur3 - 6.*ur2 + 4.)
+        srb2 = (1./6.) * (3.*tr3 - 6.*tr2 + 4.)
+        srb3 = (1./6.) * ur3
+        corr0 = bn0 * tr * ur
+        corr1 = bn1 * tr * ur
+        corr2 = bn2 * tr * ur
+
+        # Base + Ruyten correction
+        sr00 = srb0
+        sr01 = srb1 + corr0
+        sr02 = srb2 - corr0
+        sr03 = srb3
+
+        sr10 = srb0
+        sr11 = srb1 + corr1
+        sr12 = srb2 - corr1
+        sr13 = srb3
+
+        sr20 = srb0
+        sr21 = srb1 + corr2
+        sr22 = srb2 - corr2
+        sr23 = srb3
+
+        # Axis-sign flips for sign=-1 variants only
+        if ir_shape < 0:
+            sr00 = -sr00
+            sr10 = -sr10
+            sr20 = -sr20
+        if ir_shape + 1 < 0:
+            sr01 = -sr01
+            sr11 = -sr11
+            sr21 = -sr21
+        if ir_shape + 2 < 0:
+            sr02 = -sr02
+            sr12 = -sr12
+            sr22 = -sr22
+        if ir_shape + 3 < 0:
+            sr03 = -sr03
+            sr13 = -sr13
+            sr23 = -sr23
+
         izs = (iz0, iz1, iz2, iz3)
         irs = (ir0, ir1, ir2, ir3)
 
         # For Jr/Jt use sign -(-1)^m ; for Jz use sign (+-1)^m
-        Sr_rt0 = (
-            Sr_cubic(r_cell, 0, -1, bn0), Sr_cubic(r_cell, 1, -1, bn0),
-            Sr_cubic(r_cell, 2, -1, bn0), Sr_cubic(r_cell, 3, -1, bn0)
-        )
-        Sr_rt1 = (
-            Sr_cubic(r_cell, 0,  1, bn1), Sr_cubic(r_cell, 1,  1, bn1),
-            Sr_cubic(r_cell, 2,  1, bn1), Sr_cubic(r_cell, 3,  1, bn1)
-        )
-        Sr_rt2 = (
-            Sr_cubic(r_cell, 0, -1, bn2), Sr_cubic(r_cell, 1, -1, bn2),
-            Sr_cubic(r_cell, 2, -1, bn2), Sr_cubic(r_cell, 3, -1, bn2)
-        )
+        # sign -1: use flipped arrays ; sign +1: use non-flipped arrays.
+        Sr_rt0 = (sr00, sr01, sr02, sr03)
+        Sr_rt1 = (srb0, srb1 + corr1, srb2 - corr1, srb3)
+        Sr_rt2 = (sr20, sr21, sr22, sr23)
 
-        Sr_z0 = (
-            Sr_cubic(r_cell, 0,  1, bn0), Sr_cubic(r_cell, 1,  1, bn0),
-            Sr_cubic(r_cell, 2,  1, bn0), Sr_cubic(r_cell, 3,  1, bn0)
-        )
-        Sr_z1 = (
-            Sr_cubic(r_cell, 0, -1, bn1), Sr_cubic(r_cell, 1, -1, bn1),
-            Sr_cubic(r_cell, 2, -1, bn1), Sr_cubic(r_cell, 3, -1, bn1)
-        )
-        Sr_z2 = (
-            Sr_cubic(r_cell, 0,  1, bn2), Sr_cubic(r_cell, 1,  1, bn2),
-            Sr_cubic(r_cell, 2,  1, bn2), Sr_cubic(r_cell, 3,  1, bn2)
-        )
+        Sr_z0 = (srb0, srb1 + corr0, srb2 - corr0, srb3)
+        Sr_z1 = (sr10, sr11, sr12, sr13)
+        Sr_z2 = (srb0, srb1 + corr2, srb2 - corr2, srb3)
 
         base = wj * c * inv_gammaj
         jr0 = base * (cos*uxj + sin*uyj)
