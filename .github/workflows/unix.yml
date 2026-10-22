@@ -40,13 +40,65 @@ jobs:
       name: pyflakes
       run: python -m pyflakes .
 
-    - shell: bash -eo pipefail -l {0}
+    - shell: bash -o pipefail -l {0}
       name: FBPIC physics tests
       run: |
         export NUMBA_THREADING_LAYER=omp
         export MKL_NUM_THREADS=2
         export OPENPMD_VERIFY_HOMOGENEOUS_EXTENTS=0
-        python -m pytest tests --ignore=tests/unautomated
+
+        echo "========== SYSTEM =========="
+        uname -a
+        echo "CPUs:"
+        nproc
+        echo "Memory:"
+        free -h
+
+        echo "========== PYTHON =========="
+        which python
+        python --version
+        python -c "print('Python OK')"
+        echo "exit: $?"
+
+        echo "========== NUMPY =========="
+        python -c "import numpy; print('numpy', numpy.__version__)"
+        echo "exit: $?"
+
+        echo "========== SCIPY =========="
+        python -c "import scipy; print('scipy', scipy.__version__)"
+        echo "exit: $?"
+
+        echo "========== NUMBA =========="
+        python -c "import numba; print('numba', numba.__version__)"
+        echo "exit: $?"
+
+        echo "========== MPI4PY =========="
+        python -c "import mpi4py; print('mpi4py', mpi4py.__version__)"
+        echo "exit: $?"
+
+        echo "========== FBPIC =========="
+        python -c "import fbpic; print('fbpic:', fbpic.__file__)"
+        echo "exit: $?"
+
+        echo "========== PYTEST =========="
+        python -m pytest --version
+        echo "exit: $?"
+
+        echo "========== TEST COLLECTION =========="
+        python -m pytest --collect-only -vv \
+          tests --ignore=tests/unautomated
+        echo "collection exit: $?"
+
+        echo "========== RUN TESTS =========="
+        python -m pytest -vv -s \
+          tests --ignore=tests/unautomated
+        status=$?
+
+        echo "========== AFTER PYTEST =========="
+        echo "pytest exit code: $status"
+        free -h
+
+        exit $status
     - shell: bash -eo pipefail -l {0}
       name: PICMI test
       run: |
